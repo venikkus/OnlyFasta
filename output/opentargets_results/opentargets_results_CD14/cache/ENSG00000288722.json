@@ -1,0 +1,1 @@
+{"status": "ok", "target": {"id": "ENSG00000288722", "approvedSymbol": "F8A1", "biotype": "protein_coding", "tractability": [], "geneticConstraint": [{"constraintType": "syn", "score": null, "oe": null, "oeUpper": null}, {"constraintType": "mis", "score": null, "oe": null, "oeUpper": null}, {"constraintType": "lof", "score": null, "oe": null, "oeUpper": null}]}}

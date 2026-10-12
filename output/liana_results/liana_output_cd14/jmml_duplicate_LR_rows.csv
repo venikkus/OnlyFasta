@@ -1,0 +1,17 @@
+source,target,ligand,receptor,lr_probs,cellchat_pvals
+Prog Mk,CD14 Mono,GDF11,ACVR2A,0.0,1.0
+Prog Mk,CD14 Mono,GDF11,ACVR2A,0.0,1.0
+NK Proliferating,CD14 Mono,GDF11,ACVR2A,0.0,1.0
+NK Proliferating,CD14 Mono,GDF11,ACVR2A,0.0,1.0
+Naive B,CD14 Mono,GDF11,ACVR2A,0.0,1.0
+Naive B,CD14 Mono,GDF11,ACVR2A,0.0,1.0
+transitional B,CD14 Mono,GDF11,ACVR2A,0.0,1.0
+transitional B,CD14 Mono,GDF11,ACVR2A,0.0,1.0
+pro B,CD14 Mono,GDF11,ACVR2A,0.0,1.0
+pro B,CD14 Mono,GDF11,ACVR2A,0.0,1.0
+pre B,CD14 Mono,GDF11,ACVR2A,0.0,1.0
+pre B,CD14 Mono,GDF11,ACVR2A,0.0,1.0
+Early Eryth,CD14 Mono,GDF11,ACVR2A,0.0,1.0
+Early Eryth,CD14 Mono,GDF11,ACVR2A,0.0,1.0
+EMP,CD14 Mono,GDF11,ACVR2A,0.0,1.0
+EMP,CD14 Mono,GDF11,ACVR2A,0.0,1.0
