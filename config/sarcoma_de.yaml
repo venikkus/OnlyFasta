@@ -1,0 +1,137 @@
+# Snakemake configuration for the sarcoma pseudobulk DE stage.
+# Run only the `pseudobulk_de` target with this config; downstream modules
+# still need sarcoma-specific evidence/resource inputs before requesting `all`.
+run_name: sarcoma_tumor_vs_microenvironment_20261013
+populations: [Sarcoma]
+
+paths:
+  project_root: .
+  results_root: results/snakemake
+  logs_root: logs/snakemake
+  benchmarks_root: benchmarks/snakemake
+  cache_root: results/snakemake_cache
+  tools:
+    pseudobulk_de: tools/differential_expression/pseudobulk_de.py
+    depmap_build: tools/depmap/build_depmap.py
+    depmap_run: tools/depmap/run_depmap.py
+    surface: tools/surface_gtex/surface_gtex_pipeline.py
+    collectri: tools/collectri/run_collectri.py
+    liana: tools/liana/liana_deg.py
+    opentargets: tools/opentarget/parse_opentarget.py
+    opentargets_report: tools/opentarget/ot_report_module.py
+    chembl: tools/chembl_parser/chembl_parser.py
+    celloracle: tools/celloracle/celloracle_candidates.py
+  workflow:
+    task_script: workflow/scripts/task.py
+    envs: workflow/envs
+
+datasets:
+  Sarcoma:
+    # Used only when pseudobulk_de.mode is switched to `reuse` later.
+    deg: results/snakemake/sarcoma_tumor_vs_microenvironment_20261013/pseudobulk_de/Sarcoma_DEGs.csv
+    gene_column: gene
+    celltype: Tumor
+    surface: data/Sarcoma_DEGs_surface_GTEx_v11.csv
+    opentargets: data/Sarcoma_opentargets_features.csv
+    liana: data/Sarcoma_LIANA_DEG_receptors.csv
+
+adata:
+  path: /media/hdd/metagenomics/hackatomics/data/MXF_annot_converted_rhdf5.h5ad
+  counts_layer: X
+  sample_column: orig.ident
+  condition_column: CellType_subset
+  celltype_column: CellType_subset
+  case: Tumor
+  control: Microenvironment
+
+pseudobulk_de:
+  mode: compute
+  output_dir: null
+  sample_col: orig.ident
+  block_col: orig.ident
+  celltype_col: CellType_subset
+  group_col: CellType_subset
+  counts_layer: X
+  group_map:
+    Tumor: Tumor
+    Macrophages: Microenvironment
+    T_cells: Microenvironment
+  cell_types:
+    Sarcoma: [Tumor, Macrophages, T_cells]
+  case_label: Tumor
+  control_label: Microenvironment
+  min_cells: 10
+  min_total_counts: 1000
+  min_replicates: 2
+  min_gene_count: 10
+  fdr: 0.05
+  lfc_cutoff: 1.0
+  n_cpus: 4
+
+depmap:
+  mode: reuse
+  features: tools/depmap/depmap_myeloid_features.csv
+  raw_dir: tools/depmap
+  release: unknown_existing_snapshot
+  field: OncotreePrimaryDisease
+  diseases: []
+  subtypes: []
+  min_models: 3
+  strength: 0.5
+  prevalence: 0.5
+  selectivity: 0.0
+
+surface:
+  mode: reuse
+  atlas_dir: resources/surface_gtex
+  gtex_max_tpm: 20
+  version: unconfigured_sarcoma_snapshot
+
+collectri:
+  mode: reuse
+  reuse_dir: data/collectri_data
+  min_cells: 20
+  min_samples: 2
+  min_targets: 5
+  batch_size: 256
+  plot_top: 5
+  network_targets: 15
+  threads: 2
+  mem_mb: 8000
+
+liana:
+  mode: "off"
+  min_cells: 10
+  expr_prop: 0.1
+  n_perms: 100
+  resource: consensus
+  seed: 42
+  threads: 2
+  mem_mb: 24000
+
+opentargets:
+  mode: "off"
+  threads: 2
+  retries: 3
+  timeout: 35
+
+chembl:
+  mode: "off"
+  threads: 2
+  min_pchembl: 6
+  max_genes: 0
+  mapping: null
+
+celloracle:
+  mode: "off"
+  threads: 4
+  mem_mb: 48000
+  celltype_col: CellType_subset
+  cell_types: {Sarcoma: Tumor}
+  case_label: Tumor
+  control_label: Microenvironment
+  hvg_col: highly_variable
+  embedding_name: X_umap
+  k: 100
+  min_case_rank: 0.90
+  min_delta_rank: 0.0
