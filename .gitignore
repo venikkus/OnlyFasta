@@ -13,3 +13,21 @@ GTEx_Analysis_*_gene_median_tpm.gct.gz
 *.xlsx.part
 *.zip.part
 .ipynb_checkpoints/
+# Python / Jupyter
+__pycache__/
+*.pyc
+.ipynb_checkpoints/
+
+# Single-cell datasets
+*.h5ad
+*.h5Seurat
+*.rds
+
+# DepMap datasets
+tools/depmap/CRISPRGeneDependency.csv
+tools/depmap/CRISPRGeneEffect.csv
+tools/depmap/CRISPRInferredCommonEssentials.csv
+
+# Generated results
+chembl_results/
+output/opentargets_results/*/cache/
