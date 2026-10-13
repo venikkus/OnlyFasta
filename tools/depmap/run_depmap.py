@@ -19,7 +19,7 @@ def main():
     parser.add_argument('--deg', required=True, help='DEG CSV/TSV file')
     parser.add_argument('--depmap', required=True, help='Precomputed DepMap features CSV/TSV file')
     parser.add_argument('--gene-col', default='gene', help='Gene column in DEG (default: gene)')
-    parser.add_argument('--out', default='deg_depmap.csv', help='Output merged CSV')
+    parser.add_argument('--out', required=True, help='Output merged CSV path, supplied by the workflow/config')
     parser.add_argument('--strength', type=float, default=0.5, help='Minimum DepMap strength')
     parser.add_argument('--prevalence', type=float, default=0.5, help='Minimum dependent fraction')
     parser.add_argument('--selectivity', type=float, default=0.0, help='Minimum AML-vs-other selectivity')

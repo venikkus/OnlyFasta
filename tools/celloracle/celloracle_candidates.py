@@ -220,7 +220,8 @@ def run_celloracle(
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--input", required=True, help="Input AnnData .h5ad file")
-    parser.add_argument("--output-dir", default="celloracle_results")
+    parser.add_argument("--output-dir", required=True,
+                        help="Output directory path, supplied by the workflow/config")
     parser.add_argument("--celltype-col", default="celltype_l2_merged")
     parser.add_argument("--condition-col", default="sample_groups_wide")
     parser.add_argument("--counts-layer", default="counts")

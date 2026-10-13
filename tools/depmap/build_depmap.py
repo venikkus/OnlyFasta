@@ -38,13 +38,15 @@ def read_genes(path):
 
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("--data-dir", type=Path, default=Path("tools/depmap"))
+    ap.add_argument("--data-dir", type=Path, required=True,
+                    help="Directory containing DepMap CSV inputs (provided from config by the workflow)")
     ap.add_argument("--field", choices=MODEL_FIELDS, default="OncotreePrimaryDisease",
                     help="Model.csv field used to select the target models")
     ap.add_argument("--diseases", nargs="+", help="Exact values in the selected Model.csv field")
     ap.add_argument("--subtypes", nargs="+", help="Exact values in OncotreeSubtype; combined with --diseases using OR")
     ap.add_argument("--list-diseases", action="store_true", help="Print available values and model counts, then exit")
-    ap.add_argument("--out", type=Path, default=Path("depmap_features.csv"))
+    ap.add_argument("--out", type=Path, required=True,
+                    help="Output feature table path (provided from config by the workflow)")
     ap.add_argument("--min-models", type=int, default=1,
                     help="Minimum models with measured Gene Effect for a gene to retain its metrics")
     args = ap.parse_args()

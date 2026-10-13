@@ -39,7 +39,8 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--deg", type=Path, help="Candidate/DEG CSV or TSV; optional in activity stage")
     p.add_argument("--reuse", action="store_true", help="Reuse saved activity results; input h5ad not needed")
     p.add_argument("--reuse-dir", type=Path, help="Directory containing previous CollecTRI results (read-only); required with --reuse")
-    p.add_argument("--outdir", type=Path, default=Path("output/collectri_results"))
+    p.add_argument("--outdir", type=Path, required=True,
+                   help="Output directory path, supplied by the workflow/config")
     p.add_argument("--counts-layer", default="counts")
     p.add_argument("--sample-col", default="batch", help="Independent biological sample ID")
     p.add_argument("--group-col", default="sample_groups_wide")

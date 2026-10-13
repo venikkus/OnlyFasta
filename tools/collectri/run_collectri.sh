@@ -1,10 +1,14 @@
-#!/bin/bash -l
-source ~/.bashrc
-cd ~/hackatomics/tools/collectri
-conda activate jmml_targets
+#!/usr/bin/env bash
+set -euo pipefail
 
-#python run_collectri.py --input ../../data/dataset.h5ad --outdir ../../data/collectri_data  --min-cells 20
-
-python run_collectri.py --reuse --reuse-dir ../../data/collectri_data/ --outdir ../../output/collectri_results/collectri_hsc_deg_candidates --deg ../../data/HSC_DEGs_Masha.csv --plot-celltype "hsc" --plot-top 5 --network-targets 15 --deg-celltype "hsc" --gene-col 'Unnamed: 0'
-python run_collectri.py --reuse --reuse-dir ../../data/collectri_data/ --outdir ../../output/collectri_results/collectri_cd14_deg_candidates --deg ../../data/CD14_Mono_DEGs_Masha.csv --plot-celltype "cd14 mono" --plot-top 5 --network-targets 15 --deg-celltype "cd14 mono" --gene-col 'Unnamed: 0'
-python run_collectri.py --reuse --reuse-dir ../../data/collectri_data/ --outdir ../../output/collectri_results/collectri_gmp_deg_candidates --deg ../../data/GMP_DEGs_Masha.csv --plot-celltype "gmp" --network-targets 15 --deg-celltype "gmp" --gene-col 'Unnamed: 0' --plot-top 5
+# Resolve the repository from this wrapper location; dataset and output paths come from config/config.yaml.
+PROJECT_ROOT="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/../.." && pwd)"
+SNAKEMAKE_BIN="${SNAKEMAKE_BIN:-snakemake}"
+SNAKEMAKE_CORES="${SNAKEMAKE_CORES:-1}"
+exec "$SNAKEMAKE_BIN" \
+  --snakefile "$PROJECT_ROOT/workflow/Snakefile" \
+  --directory "$PROJECT_ROOT" \
+  --configfile "$PROJECT_ROOT/config/config.yaml" \
+  --cores "$SNAKEMAKE_CORES" \
+  --until collectri \
+  "$@"

@@ -1,8 +1,14 @@
-#!/bin/bash -l
-source ~/.bashrc
-cd ~/hackatomics/tools/liana
-conda activate jmml_targets
+#!/usr/bin/env bash
+set -euo pipefail
 
-python liana_deg.py --input ../../data/dataset.h5ad --deg ../../data/CD14_Mono_DEGs_surface_GTEx_v11.csv --outdir ../../output/liana_results/CD14_surface/
-python liana_deg.py --input ../../data/dataset.h5ad --deg ../../data/HSC_DEGs_surface_GTEx_v11.csv --outdir ../../output/liana_results/HSC_surface/
-python liana_deg.py --input ../../data/dataset.h5ad --deg ../../data/GMP_DEGs_surface_GTEx_v11.csv --outdir ../../output/liana_results/GMP_surface/
+# Resolve the repository from this wrapper location; dataset and output paths come from config/config.yaml.
+PROJECT_ROOT="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/../.." && pwd)"
+SNAKEMAKE_BIN="${SNAKEMAKE_BIN:-snakemake}"
+SNAKEMAKE_CORES="${SNAKEMAKE_CORES:-1}"
+exec "$SNAKEMAKE_BIN" \
+  --snakefile "$PROJECT_ROOT/workflow/Snakefile" \
+  --directory "$PROJECT_ROOT" \
+  --configfile "$PROJECT_ROOT/config/config.yaml" \
+  --cores "$SNAKEMAKE_CORES" \
+  --until liana \
+  "$@"

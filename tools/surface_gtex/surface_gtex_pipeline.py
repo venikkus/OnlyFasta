@@ -386,7 +386,8 @@ def main(d):
 
 if __name__ == "__main__":
     ap = argparse.ArgumentParser(description=__doc__)
-    ap.add_argument("--dir", type=Path, default=HERE, help="папка с DEG-таблицами и атласами")
+    ap.add_argument("--dir", type=Path, required=True,
+                    help="папка с DEG-таблицами и атласами, задаётся конфигом workflow")
     ap.add_argument("--no-venv", action="store_true", help="не создавать .venv, ставить пакеты в текущий Python")
     ap.add_argument("--update-hpa", action="store_true", help="перекачать Human Protein Atlas")
     args = ap.parse_args()

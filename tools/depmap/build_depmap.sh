@@ -1,28 +1,14 @@
-#!/bin/bash -l
-source ~/.bashrc
-cd ~/hackatomics/tools/depmap
-conda activate jmml_targets
+#!/usr/bin/env bash
+set -euo pipefail
 
-# python build_depmap.py \
-#     --data-dir . \
-#     --field OncotreePrimaryDisease \
-#     --diseases \
-#         "Acute Myeloid Leukemia" \
-#         "Myeloproliferative Neoplasms" \
-#     --subtypes \
-#         "Acute Myeloid Leukemia" \
-#         "AML, NOS" \
-#         "Acute Monoblastic/Monocytic Leukemia" \
-#         "AML with Myelodysplasia-Related Changes" \
-#         "Myeloid Leukemia Associated with Down Syndrome" \
-#     --out depmap_myeloid_features.csv
-    
-    
-    
-python build_depmap.py \
-    --data-dir . \
-    --field OncotreePrimaryDisease \
-    --diseases \
-        "Fibrosarcoma" \
-        "Myxofibrosarcoma" 
-    --out depmap_sarcoma_features.csv
+# Resolve the repository from this wrapper location; dataset and output paths come from config/config.yaml.
+PROJECT_ROOT="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/../.." && pwd)"
+SNAKEMAKE_BIN="${SNAKEMAKE_BIN:-snakemake}"
+SNAKEMAKE_CORES="${SNAKEMAKE_CORES:-1}"
+exec "$SNAKEMAKE_BIN" \
+  --snakefile "$PROJECT_ROOT/workflow/Snakefile" \
+  --directory "$PROJECT_ROOT" \
+  --configfile "$PROJECT_ROOT/config/config.yaml" \
+  --cores "$SNAKEMAKE_CORES" \
+  --until depmap_features \
+  "$@"

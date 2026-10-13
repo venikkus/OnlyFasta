@@ -160,7 +160,7 @@ def numeric(s):
 def main():
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("--deg", required=True, help="CSV/TSV with column gene")
-    ap.add_argument("--out", default="chembl_results")
+    ap.add_argument("--out", required=True, help="Output directory path, supplied by the workflow/config")
     ap.add_argument("--workers", type=int, default=8, help="concurrent API requests; suggested 2-4")
     ap.add_argument("--min-pchembl", type=float, default=6)
     ap.add_argument("--mapping", help="Optional CSV with columns gene,target_chembl_id (skip MyGene lookup)")

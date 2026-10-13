@@ -158,8 +158,8 @@ def fetch_one(ensembl_id, cache_dir, retries, timeout):
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument('--input', default='gmp_filt.csv')
-    ap.add_argument('--outdir', default='opentargets_results')
+    ap.add_argument('--input', required=True, help='Input table path, supplied by the workflow/config')
+    ap.add_argument('--outdir', required=True, help='Output directory path, supplied by the workflow/config')
     ap.add_argument('--workers', type=int, default=4)
     ap.add_argument('--retries', type=int, default=6)
     ap.add_argument('--timeout', type=float, default=35)

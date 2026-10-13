@@ -1,10 +1,14 @@
-#!/bin/bash -l
-source ~/.bashrc
-cd ~/hackatomics/tools/depmap
-conda activate jmml_targets
+#!/usr/bin/env bash
+set -euo pipefail
 
-python run_depmap.py --deg ../../data/CD14_Mono_candidates_GTEx_v11.csv --depmap depmap_features.csv --out ../../output/depmap_results/depmap_results_cd14_candidates/depmap_results_cd14_atlases.csv
-
-python run_depmap.py --deg ../../data/GMP_candidates_GTEx_v11.csv --depmap depmap_features.csv --out ../../output/depmap_results/depmap_results_gmp_candidates/depmap_results_gmp_atlases.csv
-
-python run_depmap.py --deg ../../data/HSC_candidates_GTEx_v11.csv --depmap depmap_features.csv --out ../../output/depmap_results/depmap_results_hsc_candidates/depmap_results_hsc_atlases.csv
+# Resolve the repository from this wrapper location; dataset and output paths come from config/config.yaml.
+PROJECT_ROOT="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/../.." && pwd)"
+SNAKEMAKE_BIN="${SNAKEMAKE_BIN:-snakemake}"
+SNAKEMAKE_CORES="${SNAKEMAKE_CORES:-1}"
+exec "$SNAKEMAKE_BIN" \
+  --snakefile "$PROJECT_ROOT/workflow/Snakefile" \
+  --directory "$PROJECT_ROOT" \
+  --configfile "$PROJECT_ROOT/config/config.yaml" \
+  --cores "$SNAKEMAKE_CORES" \
+  --until depmap \
+  "$@"
