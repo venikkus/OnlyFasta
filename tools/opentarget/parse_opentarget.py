@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 """Resumable, rate-limited Open Targets target annotation for DEG tables."""
 import argparse
 import json
@@ -13,6 +12,7 @@ from pathlib import Path
 
 import pandas as pd
 import requests
+from ot_report_module import make_report
 from requests.adapters import HTTPAdapter
 from tqdm.auto import tqdm
 
@@ -163,21 +163,32 @@ def main():
     ap.add_argument('--workers', type=int, default=4)
     ap.add_argument('--retries', type=int, default=6)
     ap.add_argument('--timeout', type=float, default=35)
+    ap.add_argument('--report', action='store_true', help='Generate a single README for small gene lists (default: off)')
+    ap.add_argument('--report-only', action='store_true', help='Generate README from existing features CSV; do not query APIs')
+    ap.add_argument('--report-max-genes', type=int, default=20, help='Maximum unique genes allowed in README (default: 20)')
     args = ap.parse_args()
     if args.workers < 1 or args.retries < 1:
         ap.error('--workers and --retries must be >= 1')
     out = Path(args.outdir)
     cache = out / 'cache'
     cache.mkdir(parents=True, exist_ok=True)
+    if args.report_max_genes < 1:
+        ap.error('--report-max-genes must be >= 1')
+    if args.report_only:
+        csv = out / 'opentargets_features.csv'
+        if not csv.exists():
+            ap.error(f'Existing results not found: {csv}')
+        print('Report written:', make_report(csv, out / 'README.md', args.report_max_genes))
+        return
     logging.basicConfig(level=logging.INFO, format='%(asctime)s %(levelname)s %(message)s')
 
     deg = pd.read_csv(args.input)
-    deg.columns=['gene', 'baseMean', 'log2FC', 'lfcSE', 'stat', 'pvalue', 'padj']
-
     if 'gene' not in deg.columns:
-        raise ValueError('Input CSV must contain a gene column')
+        deg.columns=['gene', 'baseMean', 'log2FC', 'lfcSE', 'stat', 'pvalue', 'padj']
     genes = sorted(set(deg['gene'].dropna().astype(str).str.strip()) - {''})
     logging.info('Input unique genes: %d', len(genes))
+    if args.report and len(genes) > args.report_max_genes:
+        ap.error(f'--report allows at most {args.report_max_genes} genes (found {len(genes)}). Run without --report to process the large list.')
     mapping = mapping_for_genes(genes, out / 'gene_mapping.csv')
     logging.info('Mapping status:\n%s', mapping['mapping_status'].value_counts(dropna=False))
 
@@ -240,6 +251,9 @@ def main():
     features.to_csv(out / 'opentargets_features.csv', index=False)
     errors = features.loc[features.ot_request_status.eq('error'), ['gene', 'ensembl_id', 'ot_error']]
     errors.to_csv(out / 'opentargets_errors.csv', index=False)
+    if args.report:
+        report_path = make_report(out / 'opentargets_features.csv', out / 'README.md', args.report_max_genes)
+        logging.info('Report created: %s', report_path)
     logging.info('Complete. found=%d, not_found=%d, errors=%d, unmapped=%d',
                  features.ot_request_status.eq('ok').sum(),
                  features.ot_request_status.eq('not_found').sum(), len(errors),

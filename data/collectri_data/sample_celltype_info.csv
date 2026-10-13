@@ -1,0 +1,34 @@
+gid,batch,sample_groups_wide,celltype_l2_merged_rename,group_id,n_cells
+0,CBL,jmml,cd14 mono,G0,1981
+1,CBL,jmml,gmp,G1,387
+2,CBL,jmml,hsc,G2,284
+3,KRAS,jmml,cd14 mono,G3,1456
+4,KRAS,jmml,gmp,G4,175
+5,KRAS,jmml,hsc,G5,177
+6,NF1_1,jmml,cd14 mono,G6,428
+7,NF1_1,jmml,gmp,G7,66
+8,NF1_1,jmml,hsc,G8,51
+9,NF1_2,jmml,cd14 mono,G9,266
+10,NF1_2,jmml,gmp,G10,48
+11,NF1_2,jmml,hsc,G11,130
+12,NRAS_1,jmml,cd14 mono,G12,446
+13,NRAS_1,jmml,gmp,G13,25
+14,NRAS_1,jmml,hsc,G14,41
+15,NRAS_2,jmml,cd14 mono,G15,131
+16,PTPN11,jmml,cd14 mono,G16,3069
+17,PTPN11,jmml,gmp,G17,120
+18,PTPN11,jmml,hsc,G18,768
+19,PTPN11_2,jmml,cd14 mono,G19,3016
+20,PTPN11_2,jmml,gmp,G20,498
+21,PTPN11_2,jmml,hsc,G21,427
+22,control1,control,cd14 mono,G22,105
+23,control1,control,gmp,G23,86
+24,control2,control,cd14 mono,G24,140
+25,control2,control,gmp,G25,33
+26,control3,control,cd14 mono,G26,375
+27,control3,control,gmp,G27,92
+28,control3,control,hsc,G28,24
+29,control4,control,cd14 mono,G29,251
+30,control5,control,cd14 mono,G30,63
+31,control6,control,cd14 mono,G31,32
+32,control7,control,cd14 mono,G32,33
