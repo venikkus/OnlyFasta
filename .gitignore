@@ -1,0 +1,14 @@
+# Python
+.venv/
+__pycache__/
+*.pyc
+
+# tools/surface_gtex: атласы, которые скрипт скачивает сам
+proteinatlas.tsv
+proteinatlas.tsv.zip
+S2_File.xlsx
+43018_2021_282_MOESM2_ESM.xlsx
+GTEx_Analysis_*_gene_median_tpm.gct.gz
+*.gz.part
+*.xlsx.part
+*.zip.part
