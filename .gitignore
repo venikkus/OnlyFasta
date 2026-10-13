@@ -12,3 +12,4 @@ GTEx_Analysis_*_gene_median_tpm.gct.gz
 *.gz.part
 *.xlsx.part
 *.zip.part
+.ipynb_checkpoints/
