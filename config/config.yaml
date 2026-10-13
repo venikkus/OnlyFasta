@@ -1,0 +1,121 @@
+# Run from the OnlyFasta repository root. Existing inputs are read-only.
+run_name: demo_20261013
+populations: [HSC, GMP, Mono_CD14]
+paths:
+  # All relative paths resolve from the directory containing this config's project root.
+  project_root: .
+  results_root: results/snakemake
+  logs_root: logs/snakemake
+  benchmarks_root: benchmarks/snakemake
+  cache_root: results/snakemake_cache
+  tools:
+    depmap_build: tools/depmap/build_depmap.py
+    depmap_run: tools/depmap/run_depmap.py
+    surface: tools/surface_gtex/surface_gtex_pipeline.py
+    collectri: tools/collectri/run_collectri.py
+    liana: tools/liana/liana_deg.py
+    opentargets: tools/opentarget/parse_opentarget.py
+    opentargets_report: tools/opentarget/ot_report_module.py
+    chembl: tools/chembl_parser/chembl_parser.py
+    celloracle: tools/celloracle/celloracle_candidates.py
+  workflow:
+    task_script: workflow/scripts/task.py
+    envs: workflow/envs
+datasets:
+  HSC:
+    deg: data/HSC_DEGs_Masha.csv
+    gene_column: "Unnamed: 0"
+    celltype: HSC
+    surface: data/HSC_DEGs_surface_GTEx_v11.csv
+    opentargets: output/opentargets_results/opentargets_results_HSC/opentargets_features.csv
+    liana: output/liana_results/liana_output_hsc/JMML_vs_Control_DEG_receptors.csv
+  GMP:
+    deg: data/GMP_DEGs_Masha.csv
+    gene_column: "Unnamed: 0"
+    celltype: GMP
+    surface: data/GMP_DEGs_surface_GTEx_v11.csv
+    opentargets: output/opentargets_results/opentargets_results_GMP/opentargets_features.csv
+    liana: output/liana_results/liana_output_gmp/JMML_vs_Control_DEG_receptors.csv
+  Mono_CD14:
+    deg: data/CD14_Mono_DEGs_Masha.csv
+    gene_column: "Unnamed: 0"
+    celltype: CD14 Mono
+    surface: data/CD14_Mono_DEGs_surface_GTEx_v11.csv
+    opentargets: output/opentargets_results/opentargets_results_CD14/opentargets_features.csv
+    liana: output/liana_results/liana_output_cd14/JMML_vs_Control_DEG_receptors.csv
+
+adata:
+  # Relative to project_root; override this on another dataset/machine.
+  path: ../data/adata_all_samples_integrated_jmml_atlas_harmony_ANNOTATED.h5ad
+  counts_layer: counts
+  sample_column: batch
+  condition_column: sample_groups_wide
+  celltype_column: celltype_l2_merged_rename
+  case: JMML
+  control: Control
+
+depmap:
+  mode: reuse  # reuse precomputed features OR build from CRISPR matrices
+  features: tools/depmap/depmap_myeloid_features.csv
+  raw_dir: tools/depmap
+  release: unknown_existing_snapshot
+  field: OncotreePrimaryDisease
+  diseases: [Acute Myeloid Leukemia, Myeloproliferative Neoplasms]
+  subtypes: [Acute Myeloid Leukemia, "AML, NOS", Acute Monoblastic/Monocytic Leukemia, AML with Myelodysplasia-Related Changes, Myeloid Leukemia Associated with Down Syndrome]
+  min_models: 3
+  strength: 0.5
+  prevalence: 0.5
+  selectivity: 0.0
+
+surface:
+  mode: reuse  # reuse existing annotations OR compute using downloaded atlases
+  atlas_dir: resources/surface_gtex
+  gtex_max_tpm: 20
+  version: GTEx_v11_existing_HPA_CSPA_TCSA_snapshot
+
+collectri:
+  mode: reuse  # saved sample-level profiles OR compute from AnnData
+  reuse_dir: data/collectri_data
+  min_cells: 20
+  min_samples: 2
+  min_targets: 5
+  batch_size: 256
+  plot_top: 5
+  network_targets: 15
+  threads: 2
+  mem_mb: 8000
+
+liana:
+  mode: reuse  # reuse, compute, off
+  min_cells: 10
+  expr_prop: 0.1
+  n_perms: 100
+  resource: consensus
+  seed: 42
+  threads: 2
+  mem_mb: 24000
+
+opentargets:
+  mode: reuse  # reuse, compute, off
+  threads: 2
+  retries: 3
+  timeout: 35
+
+chembl:
+  mode: "off"  # quote off in YAML; compute enables external API queries
+  threads: 2
+  min_pchembl: 6
+  max_genes: 0  # >0 is only a technical smoke test, not a target ranking
+  mapping: null  # optional CSV: gene,target_chembl_id
+
+
+celloracle:
+  mode: compute
+  threads: 4
+  mem_mb: 48000
+  celltype_col: celltype_l2_merged
+  hvg_col: highly_variable
+  embedding_name: X_umap
+  k: 100
+  min_jmml_rank: 0.90
+  min_delta_rank: 0.0
