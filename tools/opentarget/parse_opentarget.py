@@ -116,11 +116,11 @@ def fetch_one(ensembl_id, cache_dir, retries, timeout):
     if cache_path.exists():
         try:
             payload = json.loads(cache_path.read_text(encoding='utf-8'))
-            if isinstance(payload, dict) and payload.get('status') in ('ok', 'not_found'):
-                return ensembl_id, payload['status'], payload.get('target'), None
-            # Backward compatibility with the old script's cached target JSON.
-            if isinstance(payload, dict) and 'id' in payload:
-                return ensembl_id, 'ok', payload, None
+            if isinstance(payload, dict) and payload.get('status') == 'not_found':
+                return ensembl_id, 'not_found', None, None
+            # Targets cached before approvedName/pathways were queried are fetched again.
+            if isinstance(payload, dict) and payload.get('status') == 'ok' and 'approvedName' in (payload.get('target') or {}):
+                return ensembl_id, 'ok', payload['target'], None
             if payload is None:
                 return ensembl_id, 'not_found', None, None
         except (ValueError, OSError):

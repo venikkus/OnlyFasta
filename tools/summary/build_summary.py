@@ -26,11 +26,11 @@ import pandas as pd
 HERE = Path(__file__).resolve().parent
 DEFAULT_OT_REPORT = HERE.parent / "opentarget" / "ot_report_module.py"
 LIANA_FILE = "JMML_vs_Control_DEG_receptors.csv"
+OPTIONAL_MODULES = ("collectri", "celloracle", "liana", "opentargets")
 
 
 def read_optional(path):
-    path = Path(path)
-    if not path.is_file():
+    if path is None or not Path(path).is_file():
         return None
     table = pd.read_csv(path)
     if "gene" in table:
@@ -63,17 +63,23 @@ def liana_top(path, n=5):
     return top.apply(lambda pairs: ", ".join(pairs.drop_duplicates().head(n))).to_dict()
 
 
-def population_table(root, population, case_label):
+def population_table(root, population, case_label, modules=OPTIONAL_MODULES):
+    """modules: optional modules that ran; outputs of other modules (e.g. left by an
+    earlier run with the same run_name) are ignored."""
     root = Path(root)
+
+    def module_file(module, path):
+        return path if module in modules else None
+
     de = read_optional(root / "de" / population / "genes.csv")
     if de is None:
         raise FileNotFoundError(f"{population}: no DE table in {root / 'de' / population}")
     surface = read_optional(root / "surface" / population / "DEGs_surface_GTEx.csv")
-    collectri = read_optional(root / "collectri" / population / "candidate_tf_activity.csv")
-    celloracle = read_optional(root / "celloracle" / f"{population}_rank_candidates.csv")
+    collectri = read_optional(module_file("collectri", root / "collectri" / population / "candidate_tf_activity.csv"))
+    celloracle = read_optional(module_file("celloracle", root / "celloracle" / f"{population}_rank_candidates.csv"))
     depmap = read_optional(root / "depmap" / population / "features.csv")
-    opentargets = read_optional(root / "opentargets" / population / "opentargets_features.csv")
-    liana = liana_top(root / "liana" / population / LIANA_FILE)
+    opentargets = read_optional(module_file("opentargets", root / "opentargets" / population / "opentargets_features.csv"))
+    liana = liana_top(module_file("liana", root / "liana" / population / LIANA_FILE))
 
     deg_branch = [] if surface is None else surface.loc[surface["Candidate"].eq("Yes"), "key"].tolist()
     tf_branch = []
@@ -163,12 +169,12 @@ Empty cells mean the module was switched off or has no data for the gene, not a 
 
 
 def build_summary(results_dir, populations, case_label, control_label, outdir,
-                  report_genes=2, ot_report_path=DEFAULT_OT_REPORT):
+                  report_genes=2, ot_report_path=DEFAULT_OT_REPORT, modules=OPTIONAL_MODULES):
     outdir = Path(outdir)
     outdir.mkdir(parents=True, exist_ok=True)
     tables, features = {}, []
     for population in populations:
-        table, opentargets = population_table(results_dir, population, case_label)
+        table, opentargets = population_table(results_dir, population, case_label, modules)
         tables[population] = table
         if opentargets is not None:
             features.append(opentargets.assign(_population=population))
@@ -205,9 +211,11 @@ def main():
     ap.add_argument("--control", required=True, help="control label, e.g. Control")
     ap.add_argument("--outdir", type=Path, required=True)
     ap.add_argument("--report-genes", type=int, default=2, help="genes in the Open Targets example report; 0 = none")
+    ap.add_argument("--modules", nargs="*", default=list(OPTIONAL_MODULES), choices=OPTIONAL_MODULES,
+                    help="optional modules that ran in this run (default: all)")
     args = ap.parse_args()
     table = build_summary(args.results_dir, args.populations, args.case, args.control, args.outdir,
-                          report_genes=args.report_genes)
+                          report_genes=args.report_genes, modules=args.modules)
     print(f"{len(table)} candidate rows -> {args.outdir / 'final_candidates.csv'}")
 
 

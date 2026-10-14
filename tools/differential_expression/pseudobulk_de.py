@@ -12,10 +12,14 @@ from __future__ import annotations
 import argparse
 from pathlib import Path
 import re
+import sys
 
 import numpy as np
 import pandas as pd
 from scipy import sparse
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "common"))
+from lazy_h5ad import open_counts  # noqa: E402
 
 
 def _validate_mapping(name, mapping):
@@ -215,6 +219,15 @@ def run_pseudobulk_de(
     return results
 
 
+def run_from_h5ad(path, outdir, *, counts_layer, **options):
+    """run_pseudobulk_de on an .h5ad file, reading the counts matrix row-wise from disk."""
+    handle, adata = open_counts(path, counts_layer)
+    try:
+        return run_pseudobulk_de(adata, outdir, counts_layer=counts_layer, **options)
+    finally:
+        handle.close()
+
+
 def _resolve_project_path(project_root: Path, value: str) -> Path:
     path = Path(value).expanduser()
     return path.resolve() if path.is_absolute() else (project_root / path).resolve()
@@ -244,14 +257,12 @@ def main():
     input_path = _resolve_project_path(project_root, str(input_path))
     output_path = _resolve_project_path(project_root, str(output_path))
 
-    import anndata as ad
-    adata = ad.read_h5ad(input_path)
     options = {k: de_cfg[k] for k in (
         "sample_col", "celltype_col", "group_col", "block_col", "counts_layer", "group_map",
         "cell_types", "case_label", "control_label", "min_cells",
         "min_total_counts", "min_replicates", "min_gene_count", "fdr",
         "lfc_cutoff", "n_cpus") if k in de_cfg}
-    run_pseudobulk_de(adata, output_path, **options)
+    run_from_h5ad(input_path, output_path, **options)
 
 
 if __name__ == "__main__":

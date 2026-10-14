@@ -98,10 +98,11 @@ def _prepare_adata(adata: Any, celltype_col: str, condition_col: str,
     hvg = adata.var[hvg_col]
     if not hvg.dropna().isin([True, False]).all():
         raise ValueError("HVG column must contain boolean values (or 0/1).")
-    # group_map translates observed labels (e.g. mutation subgroups) to case/control.
+    # group_map translates observed labels (e.g. mutation subgroups) to case/control;
+    # as in pseudobulk_de, labels missing from group_map are excluded.
     condition = adata.obs[condition_col].astype(str)
     if group_map:
-        condition = condition.map({str(k): str(v) for k, v in group_map.items()}).fillna(condition)
+        condition = condition.map({str(k): str(v) for k, v in group_map.items()})
     mask = (adata.obs[celltype_col].isin(cell_types.values())
             & condition.isin([control_label, case_label]))
     selected = adata[mask.to_numpy(), hvg.fillna(False).astype(bool).to_numpy()]

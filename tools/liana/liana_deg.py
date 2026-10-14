@@ -12,6 +12,10 @@ import pandas as pd
 import scanpy as sc
 import scipy.sparse as sp
 
+import sys
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "common"))
+from lazy_h5ad import open_counts  # noqa: E402
+
 LOG = logging.getLogger("liana_deg_diff")
 KEYS = ["source", "target", "ligand", "receptor"]
 SCORES = ["lr_probs", "cellchat_pvals"]
@@ -144,18 +148,18 @@ def main():
     LOG.info("Loaded %d DEG records, %d unique genes",
              len(deg), deg[args.gene_col].nunique())
 
-    backed = sc.read_h5ad(args.input, backed="r")
+    # anndata's backed mode would still load every layer into RAM; open_counts reads
+    # only the selected rows of the counts matrix.
+    handle, backed = open_counts(args.input, args.counts_layer)
     try:
         obs = backed.obs.copy()
         for col in (args.condition_col, args.celltype_col):
             if col not in obs:
                 raise ValueError(f"Missing obs column: {col}")
-        if args.counts_layer != "X" and args.counts_layer not in backed.layers:
-            raise ValueError(f"Input AnnData has no layers[{args.counts_layer!r}]")
         jmml = run_condition(backed, obs, args.jmml_label, args, outdir)
         control = run_condition(backed, obs, args.control_label, args, outdir)
     finally:
-        backed.file.close()
+        handle.close()
 
     jmml = jmml.rename(columns={c: f"{c}_jmml" for c in SCORES})
     control = control.rename(columns={c: f"{c}_control" for c in SCORES})

@@ -160,10 +160,11 @@ rule depmap:
     conda: str(Path(ENVS) / "tables.yaml")
     script: TASK
 
+# The tool path is a param, not an input, and the config is not passed: editing the tool
+# or the config must not trigger a re-download that replaces the existing atlas_dir.
 rule fetch_surface_atlases:
-    input: tool=TOOLS["surface"]
     output: directory(config["surface"]["atlas_dir"])
-    params: stage="fetch_surface", cfg=config
+    params: stage="fetch_surface", cfg={"datasets": {}}, tool=TOOLS["surface"]
     log: LOGS + "/fetch_surface.log"
     benchmark: BENCH + "/fetch_surface.tsv"
     resources: mem_mb=1000, api_slots=1

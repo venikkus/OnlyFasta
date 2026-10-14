@@ -28,6 +28,10 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 import scipy.sparse as sp
+
+import sys
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "common"))
+from lazy_h5ad import open_counts  # noqa: E402
 from scipy.stats import mannwhitneyu
 from statsmodels.stats.multitest import multipletests
 
@@ -63,7 +67,8 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--network-targets", type=int, default=15)
     p.add_argument("--plot-tfs", nargs="+", default=None, help="Explicit TFs to plot (e.g. ZEB1 GATA2); overrides --plot-top")
     p.add_argument("--no-plots", action="store_true", help="Disable PDF network plots")
-    p.add_argument("--backed", action="store_true", help="Read h5ad backed (low RAM, potentially slower)")
+    p.add_argument("--backed", action="store_true",
+                   help="Keep the counts matrix on disk and read it row-wise (low RAM, potentially slower)")
     return p.parse_args()
 
 
@@ -491,7 +496,9 @@ def main() -> None:
         import anndata as ad
         import decoupler as dc
         LOG.info("Reading %s", args.input)
-        adata = ad.read_h5ad(args.input, backed="r" if args.backed else None)
+        # anndata's backed mode would still load every layer into RAM; open_counts does not.
+        handle, adata = (open_counts(args.input, args.counts_layer) if args.backed
+                         else (None, ad.read_h5ad(args.input)))
         try:
             cell_idx, group_codes, group_info = select_groups(adata, args)
             net_full, net_covered, coverage, target_idx = load_network(adata, args, dc)
@@ -512,8 +519,8 @@ def main() -> None:
             )
             summary.to_csv(args.outdir / "tf_activity_summary.csv", index=False)
         finally:
-            if args.backed and adata.file.is_open:
-                adata.file.close()
+            if handle is not None:
+                handle.close()
 
     # Calculate group-profile ULM p-values for BOTH fresh and --reuse runs.
     # These are within-condition enrichment tests, not p-values of JMML vs Control.

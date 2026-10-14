@@ -65,7 +65,8 @@ def fingerprint(path):
     p = Path(path)
     result = {"path": str(p.resolve()), "size": p.stat().st_size, "mtime_ns": p.stat().st_mtime_ns}
     if p.is_file() and p.stat().st_size <= 64 * 1024**2:
-        result["sha256"] = hashlib.file_digest(p.open("rb"), "sha256").hexdigest()
+        with p.open("rb") as handle:
+            result["sha256"] = hashlib.file_digest(handle, "sha256").hexdigest()
     elif p.is_dir():
         result["files"] = [fingerprint(x) for x in sorted(p.iterdir()) if x.is_file() and not x.name.startswith(".")]
     else:
@@ -103,19 +104,14 @@ def norm_deg(w):
 def pseudobulk_de(w):
     cfg = C["pseudobulk_de"]
     module = tool_module(I.tool)
-    import anndata as ad
-    # The integrated JMML atlas is ~33 GB. Backed mode keeps the full matrix
-    # on disk; pseudobulk_de only indexes selected cells from the raw counts layer.
-    adata = ad.read_h5ad(I.adata, backed="r")
+    # The integrated JMML atlas is ~33 GB. anndata's backed mode would still load every
+    # layer into RAM, so the counts matrix is read row-wise from disk (tools/common/lazy_h5ad.py).
     options = {key: cfg[key] for key in (
         "sample_col", "celltype_col", "group_col", "block_col", "counts_layer", "group_map",
         "cell_types", "case_label", "control_label", "min_cells", "min_total_counts",
         "min_replicates", "min_gene_count", "fdr", "lfc_cutoff")}
     options["n_cpus"] = snakemake.threads
-    try:
-        results = module.run_pseudobulk_de(adata, w, **options)
-    finally:
-        adata.file.close()
+    results = module.run_from_h5ad(I.adata, w, **options)
     for population, result in results.items():
         if population not in C["populations"]:
             raise ValueError(f"DE configured output {population!r} is not in populations")
@@ -354,7 +350,9 @@ def summary(w):
     table = module.build_summary(Path(I.report).parent, C["populations"], C["adata"]["case"],
                                  C["adata"]["control"], w,
                                  report_genes=C.get("summary", {}).get("opentargets_report_genes", 2),
-                                 ot_report_path=I.ot_report)
+                                 ot_report_path=I.ot_report,
+                                 modules=[m for m in ("collectri", "liana", "opentargets") if C[m]["mode"] != "off"]
+                                 + (["celloracle"] if C["celloracle"]["mode"] == "compute" else []))
     QC["n_candidate_rows"] = len(table)
     QC["per_population"] = table.Population.value_counts().to_dict()
     QC["tf_branch"] = int(table.TF.eq("Yes").sum())
@@ -362,7 +360,7 @@ def summary(w):
 
 def execute(w):
     if STAGE == "fetch_surface":
-        module = tool_module(I.tool)
+        module = tool_module(snakemake.params.tool)
         module.fetch_data(w, update_hpa=False)
         QC["source_urls"] = module.URLS
     elif STAGE == "collectri_profiles":
