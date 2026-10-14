@@ -50,7 +50,42 @@ Individual Python tools can also be run directly; pass input and output paths ex
 | `depmap.features` or `depmap.mode: build` + `diseases` | DepMap models relevant to your disease |
 | `surface.exclude_gtex_tissues` | GTEx tissues ignored in the normal-tissue filter (blood-forming tissues for haematological tumours, `[]` for solid tumours) |
 
-Each module has a `mode`: `compute` runs it, `reuse` takes a precomputed table from `datasets.<pop>`, and `off` (where available) skips it. CollecTRI and LIANA compare one cell type between conditions; switch them `off` when the contrast is defined by cell type itself (as in the sarcoma example).
+Each module has a `mode`: `compute` runs it, `reuse` takes a precomputed table from `datasets.<pop>`, and `"off"` (where available) skips it; its columns in the summary stay empty.
+
+### Before you run: checklist
+
+1. **One config = one analysis.** Use a new `run_name` for every analysis; relative paths resolve from the repository root. Keep machine-specific configs (with your own `adata.path`) outside the repository, e.g. `cp config/examples/sarcoma_de.yaml ~/my_run.yaml`.
+2. **Raw integer counts.** `adata.counts_layer` must point to unnormalized integer counts (a key of `adata.layers`, or `X`). Normalized, log or SCT values make the DE step fail. Objects converted from Seurat often keep normalized data in `X`; check before running.
+3. **Choose the design; it decides which modules can run.**
+
+   | Design | Example | `pseudobulk_de.group_col` | `block_col` | Modules |
+   |---|---|---|---|---|
+   | Between patient groups: the same cell type in case vs control patients | JMML: HSC of JMML patients vs HSC of controls | column with the patient group | `null` | all |
+   | Within samples: different cell types of the same patients | Sarcoma: tumour cells vs microenvironment | the cell type column | patient / sample ID | switch `collectri`, `liana` and `celloracle` to `"off"`: they compare one cell type between conditions |
+
+4. **`group_map` translates labels to case/control.** Keys are values found in `group_col`, values are the contrast labels (e.g. `PTPN11: JMML`, `Macrophages: Microenvironment`). Values missing from the map are excluded. The resulting labels must equal both `adata.case`/`adata.control` and `pseudobulk_de.case_label`/`control_label`.
+5. **Three lists must match:** `populations`, the keys of `datasets` and the keys of `pseudobulk_de.cell_types`. `datasets.<pop>.celltype` is the value of `adata.celltype_column` for that population.
+6. **Keep duplicated settings consistent:** `pseudobulk_de.sample_col`, `celltype_col`, `group_col` and `counts_layer` usually equal `adata.sample_column`, `celltype_column`, `condition_column` and `counts_layer`.
+7. **Disease-specific settings:** DepMap models of your disease (`depmap.features`, or `depmap.mode: build` with `diseases`); GTEx tissues ignored in the normal-tissue filter (`surface.exclude_gtex_tissues`: blood-forming tissues for haematological tumours, `[]` for solid tumours); `surface.paper_check: false` unless the data are JMML.
+8. **Data requirements:** gene symbols (HGNC) as unique `var_names` (surface, Open Targets and CollecTRI match on symbols); at least `pseudobulk_de.min_replicates` (default 2) samples per condition; internet access for conda environments, surface atlases, Open Targets and ChEMBL.
+9. **Resources:** `threads` and `mem_mb` per module are hints for the scheduler. On a laptop run without `--resources`; on a server, `--resources mem_mb=<available>` keeps parallel jobs within memory.
+10. **Always dry-run first** (`-n`), then run; read `results/<run_name>/summary/` first.
+
+To check a dataset before writing the config, list its metadata and test the counts without loading the whole matrix (run in the `onlyfasta-deseq2` environment: `mamba env create -f workflow/envs/deseq2.yaml -n onlyfasta-deseq2`):
+
+```bash
+python - <<'EOF'
+import sys, numpy as np
+sys.path.insert(0, "tools/common")
+from lazy_h5ad import open_counts
+handle, adata = open_counts("path/to/your_dataset.h5ad", "X")   # or the name of the counts layer
+print(adata.n_obs, "cells,", adata.n_vars, "genes; obs columns:", list(adata.obs.columns))
+rows = (adata.X if adata.X is not None else next(iter(adata.layers.values())))[np.arange(min(500, adata.n_obs)), :]
+values = rows.data if hasattr(rows, "data") else np.asarray(rows).ravel()
+print("raw integer counts:", bool(np.all(values >= 0) and np.all(values == np.round(values))))
+handle.close()
+EOF
+```
 
 ## Outputs
 
