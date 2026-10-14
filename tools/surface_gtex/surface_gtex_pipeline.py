@@ -1,7 +1,12 @@
 #!/usr/bin/env python3
-"""DEG × атласы поверхностных белков (HPA + CSPA + TCSA) × GTEx v11.
+r"""DEG × атласы поверхностных белков (HPA + CSPA + TCSA) × GTEx v11.
 
-Запуск:  python3 surface_gtex_pipeline.py [--dir ПАПКА] [--no-venv] [--update-hpa]
+Одна популяция за запуск:
+  python3 surface_gtex_pipeline.py --deg DEGs.csv --name HSC --atlas-dir resources/surface_gtex \
+      --outdir results/surface/HSC [--gene-col gene] [--gtex-max-tpm 20] \
+      [--exclude-tissues "whole blood" spleen] [--paper-check] [--no-venv]
+Только скачать атласы:  python3 surface_gtex_pipeline.py --atlas-dir DIR --fetch-only
+Python API:  run_surface(deg_df, "HSC", atlas_dir, outdir, gtex_max_tpm=20, exclude_tissue_keys=[...])
 """
 import argparse
 import importlib.util
@@ -25,11 +30,6 @@ URLS = {
     "gtex_v8": "https://storage.googleapis.com/adult-gtex/bulk-gex/v8/rna-seq/GTEx_Analysis_2017-06-05_v8_RNASeQCv1.1.9_gene_median_tpm.gct.gz",
 }
 
-DEG_FILES = {
-    "HSC": "HSC_DEGs_Masha.csv",
-    "GMP": "GMP_DEGs_Masha.csv",
-    "CD14 Mono": "CD14_Mono_DEGs_Masha.csv",
-}
 HPA_FILE = "proteinatlas.tsv"
 CSPA_FILE = "S2_File.xlsx"
 TCSA_FILE = "43018_2021_282_MOESM2_ESM.xlsx"
@@ -43,9 +43,11 @@ HPA_SECRETOME = "Intracellular and membrane"
 CSPA_CATEGORIES = ["1 - high confidence", "2 - putative", "3 - unspecific"]
 TCSA_EXCLUDE_MONOTOPIC = False
 GTEX_MAX_TPM = 20
+# Ткани GTEx, которые не учитываются при оценке экспрессии в норме. Значение по умолчанию —
+# кроветворные ткани (для гемобластозов вроде JMML); для солидных опухолей обычно [].
 HEMATO_KEYS = ["whole blood", "spleen", "ebv-transformed lymphocytes"]
-EXTRA_HEMATO = []
 
+# Сверка с JMML-статьёй Werner et al. 2025; только при --paper-check (surface.paper_check).
 PAPER = {
     "bulk, 15 финальных": ["CLEC12A", "CD300LB", "CEACAM8", "CLEC5A", "ENTPD7", "FCAR", "FCGR1A", "ITGB7",
                            "LILRB1", "LRRC25", "PTAFR", "SIGLEC9", "SIRPB1", "SLC22A4", "SLC8A1"],
@@ -117,10 +119,36 @@ def fetch_data(d, update_hpa):
 
 
 # ---------- анализ ----------
-def main(d):
+def read_deg(path, gene_col=None):
+    """DEG-таблица с генами в колонке gene_col (по умолчанию — первая колонка)."""
+    import pandas as pd
+    deg = pd.read_csv(path, index_col=0) if gene_col is None else pd.read_csv(path).set_index(gene_col)
+    deg.index = deg.index.astype(str)
+    deg.index.name = "gene"
+    return deg
+
+
+def run_surface(deg, name, atlas_dir, outdir, *, gtex_max_tpm=GTEX_MAX_TPM,
+                exclude_tissue_keys=None, paper_check=False):
+    """Аннотирует DEG одной популяции и пишет таблицы в outdir.
+
+    deg: DataFrame с генами в индексе и колонками DESeq2 (нужны log2FoldChange и padj).
+    Выходы: DEGs_surface.csv, DEGs_surface_GTEx.csv, candidates.csv, DEGs_surface_GTEx.xlsx
+    (+ paper_comparison.csv при paper_check).
+    """
     import warnings
     import numpy as np
     import pandas as pd
+
+    d, out = Path(atlas_dir), Path(outdir)
+    out.mkdir(parents=True, exist_ok=True)
+    exclude = [k.strip().lower() for k in (HEMATO_KEYS if exclude_tissue_keys is None else exclude_tissue_keys)]
+    missing_cols = {"log2FoldChange", "padj"} - set(deg.columns)
+    if missing_cols:
+        sys.exit(f"{name}: в DEG-таблице нет колонок {sorted(missing_cols)}")
+    missing = [f for f in (HPA_FILE, CSPA_FILE, TCSA_FILE, GTEX_FILE) if not (d / f).exists()]
+    if missing:
+        sys.exit(f"Нет атласов в {d}: {', '.join(missing)} (скачайте: --fetch-only)")
 
     warnings.filterwarnings("ignore", message="Unknown extension is not supported")
     pd.set_option("display.width", 250, "display.max_columns", 50, "display.max_colwidth", 120)
@@ -130,10 +158,7 @@ def main(d):
         if obj is not None:
             print(obj.to_string() if hasattr(obj, "to_string") else obj)
 
-    missing = [f for f in DEG_FILES.values() if not (d / f).exists()]
-    if missing:
-        sys.exit(f"Нет файлов DEG в {d}: {', '.join(missing)}")
-    degs = {ct: pd.read_csv(d / f, index_col=0) for ct, f in DEG_FILES.items()}
+    degs = {name: deg}
 
     overview = pd.DataFrame({
         ct: {"DEG всего": len(x),
@@ -235,12 +260,13 @@ def main(d):
         "хотя бы в одном атласе": len(hpa_surface | cspa_surface | tcsa_surface),
     }, name="генов"))
 
-    ctrl = annotate_surface(CHECK_GENES)
-    mark = {True: "✓", False: "✗"}
-    show("Контроль на мишенях из статьи", pd.DataFrame({
-        "HPA": ctrl["HPA_surface"].map(mark), "CSPA": ctrl["CSPA_surface"].map(mark),
-        "TCSA": ctrl["TCSA_surface"].map(mark), "итог": ctrl["Surface"],
-        "основание": ctrl.apply(which_atlases, axis=1)}))
+    if paper_check:
+        ctrl = annotate_surface(CHECK_GENES)
+        mark = {True: "✓", False: "✗"}
+        show("Контроль на мишенях из статьи", pd.DataFrame({
+            "HPA": ctrl["HPA_surface"].map(mark), "CSPA": ctrl["CSPA_surface"].map(mark),
+            "TCSA": ctrl["TCSA_surface"].map(mark), "итог": ctrl["Surface"],
+            "основание": ctrl.apply(which_atlases, axis=1)}))
 
     # воронка по атласам
     funnel = []
@@ -251,7 +277,7 @@ def main(d):
             "тип клеток": ct, "повышены": len(t),
             "в HPA": int(t["HPA_surface"].sum()), "в CSPA": int(t["CSPA_surface"].sum()),
             "в TCSA": int(t["TCSA_surface"].sum()), "≥1 атлас": n_memb,
-            "%": round(100 * n_memb / len(t), 1),
+            "%": round(100 * n_memb / len(t), 1) if len(t) else 0.0,
             "в 1 / 2 / 3": f"{(t.n_atlases == 1).sum()} / {(t.n_atlases == 2).sum()} / {(t.n_atlases == 3).sum()}"})
     show("Повышенные гены → атласы", pd.DataFrame(funnel).set_index("тип клеток"))
 
@@ -259,7 +285,7 @@ def main(d):
     gtex = pd.read_csv(d / GTEX_FILE, sep="\t", skiprows=2)
     norm = lambda s: s.lower().replace("_", " ")
     ens = lambda s: s.astype(str).str.split(".").str[0]
-    hemato = [c for c in gtex.columns if any(k in norm(c) for k in HEMATO_KEYS + EXTRA_HEMATO)]
+    hemato = [c for c in gtex.columns if any(k in norm(c) for k in exclude)]
     tissues = [c for c in gtex.columns if c not in ["Name", "Description", *hemato]]
     by_sym = gtex.groupby("Description")[tissues].max()
     by_ens = gtex.assign(ens=ens(gtex["Name"])).groupby("ens")[tissues].max()
@@ -282,7 +308,7 @@ def main(d):
             return ens_max[e], ens_top[e], "Ensembl"
         return np.nan, np.nan, "not_found"
 
-    show(f"GTEx {GTEX_VERSION}: {len(tissues)} тканей; исключены: {', '.join(hemato)}")
+    show(f"GTEx {GTEX_VERSION}: {len(tissues)} тканей; исключены: {', '.join(hemato) or '—'}")
 
     # аннотация всех DEG
     surface_only, final, cands, funnel = {}, {}, {}, []
@@ -297,7 +323,7 @@ def main(d):
         t["GTEx_max_TPM"] = tpm.round(2)
         t["GTEx_max_tissue"] = [r[1] for r in res]
         t["GTEx_match"] = [r[2] for r in res]
-        t["Tumor_specific"] = np.select([tpm.isna(), tpm < GTEX_MAX_TPM],
+        t["Tumor_specific"] = np.select([tpm.isna(), tpm < gtex_max_tpm],
                                         ["No_GTEx_data", "Specific"], default="Not_specific")
         t["GTEx_version"] = GTEX_VERSION
         t["Candidate"] = np.where((t.DE_status == "Up") & (t.Surface == "Membrane")
@@ -311,24 +337,18 @@ def main(d):
             "тип клеток": ct,
             "повышены": int((t.DE_status == "Up").sum()),
             "+ мембранные": len(um),
-            f"+ GTEx < {GTEX_MAX_TPM} TPM → кандидаты": len(c),
+            f"+ GTEx < {gtex_max_tpm} TPM → кандидаты": len(c),
             "мембранные: Not_specific": int((um.Tumor_specific == "Not_specific").sum()),
             "мембранные: No_GTEx_data": int((um.Tumor_specific == "No_GTEx_data").sum())})
 
-    # сохранение
-    for ct in final:
-        name = ct.replace(" ", "_")
-        to_yes_no(surface_only[ct]).to_csv(d / f"{name}_DEGs_surface.csv")
-        to_yes_no(final[ct]).to_csv(d / f"{name}_DEGs_surface_GTEx_{GTEX_VERSION}.csv")
-        to_yes_no(cands[ct]).to_csv(d / f"{name}_candidates_GTEx_{GTEX_VERSION}.csv")
-    with pd.ExcelWriter(d / "DEGs_surface_all.xlsx") as xw:
-        for ct, t in surface_only.items():
-            to_yes_no(t).to_excel(xw, sheet_name=ct.replace(" ", "_"))
-    with pd.ExcelWriter(d / f"DEGs_surface_GTEx_{GTEX_VERSION}.xlsx") as xw:
-        for ct in final:
-            name = ct.replace(" ", "_")
-            to_yes_no(final[ct]).to_excel(xw, sheet_name=f"{name}_all")
-            to_yes_no(cands[ct]).to_excel(xw, sheet_name=f"{name}_candidates")
+    # сохранение: версия GTEx записана в колонке GTEx_version, не в имени файла
+    to_yes_no(surface_only[name]).to_csv(out / "DEGs_surface.csv")
+    to_yes_no(final[name]).to_csv(out / "DEGs_surface_GTEx.csv")
+    to_yes_no(cands[name]).to_csv(out / "candidates.csv")
+    with pd.ExcelWriter(out / "DEGs_surface_GTEx.xlsx") as xw:
+        to_yes_no(surface_only[name]).to_excel(xw, sheet_name="surface")
+        to_yes_no(final[name]).to_excel(xw, sheet_name="surface_GTEx")
+        to_yes_no(cands[name]).to_excel(xw, sheet_name="candidates")
 
     show(f"Воронка: атласы → GTEx {GTEX_VERSION}", pd.DataFrame(funnel).set_index("тип клеток"))
 
@@ -357,6 +377,10 @@ def main(d):
          ", ".join(all_genes))
     print(summary.to_string())
 
+    if not paper_check:
+        print(f"\nГотово. Файлы сохранены в {out}")
+        return final[name]
+
     # сверка со статьёй
     rows = []
     for lst, genes in PAPER.items():
@@ -368,7 +392,7 @@ def main(d):
     cmp["повышен у нас"] = cmp[list(degs)].gt(0).any(axis=1)
     surf = annotate_surface(cmp["ген"].unique())
     cmp["атласы"] = cmp["ген"].map(surf.apply(which_atlases, axis=1))
-    cmp.to_csv(d / "paper_comparison.csv", index=False)
+    cmp.to_csv(out / "paper_comparison.csv", index=False)
 
     summ = []
     for lst, s in cmp.groupby("список", sort=False):
@@ -381,18 +405,33 @@ def main(d):
     hits = cmp[cmp[list(degs)].notna().any(axis=1)].drop_duplicates("ген").set_index("ген")
     show("Гены из статьи, значимые у нас", hits[list(degs)].map(fmt).join(hits["атласы"]))
 
-    print(f"\nГотово. Файлы сохранены в {d}")
+    print(f"\nГотово. Файлы сохранены в {out}")
+    return final[name]
 
 
 if __name__ == "__main__":
-    ap = argparse.ArgumentParser(description=__doc__)
-    ap.add_argument("--dir", type=Path, required=True,
-                    help="папка с DEG-таблицами и атласами, задаётся конфигом workflow")
+    ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    ap.add_argument("--deg", type=Path, help="DEG-таблица одной популяции (CSV)")
+    ap.add_argument("--name", help="имя популяции (подписи в выводе)")
+    ap.add_argument("--gene-col", default=None, help="колонка с генами; по умолчанию первая колонка")
+    ap.add_argument("--atlas-dir", type=Path, required=True, help="папка с атласами (скачиваются, если их нет)")
+    ap.add_argument("--outdir", type=Path, help="папка для результатов")
+    ap.add_argument("--gtex-max-tpm", type=float, default=GTEX_MAX_TPM)
+    ap.add_argument("--exclude-tissues", nargs="*", default=HEMATO_KEYS,
+                    help="подстроки названий тканей GTEx, которые не учитываются; без значений — не исключать ничего")
+    ap.add_argument("--paper-check", action="store_true", help="сверка с JMML-статьёй Werner et al. 2025")
+    ap.add_argument("--fetch-only", action="store_true", help="только скачать атласы в --atlas-dir")
     ap.add_argument("--no-venv", action="store_true", help="не создавать .venv, ставить пакеты в текущий Python")
     ap.add_argument("--update-hpa", action="store_true", help="перекачать Human Protein Atlas")
     args = ap.parse_args()
+    if not args.fetch_only and not (args.deg and args.name and args.outdir):
+        ap.error("нужны --deg, --name и --outdir (или --fetch-only)")
 
     ensure_env(use_venv=not args.no_venv)
-    data_dir = args.dir.resolve()
-    fetch_data(data_dir, args.update_hpa)
-    main(data_dir)
+    atlas_dir = args.atlas_dir.resolve()
+    atlas_dir.mkdir(parents=True, exist_ok=True)
+    fetch_data(atlas_dir, args.update_hpa)
+    if not args.fetch_only:
+        run_surface(read_deg(args.deg, args.gene_col), args.name, atlas_dir, args.outdir.resolve(),
+                    gtex_max_tpm=args.gtex_max_tpm, exclude_tissue_keys=args.exclude_tissues,
+                    paper_check=args.paper_check)

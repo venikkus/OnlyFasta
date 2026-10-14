@@ -31,3 +31,11 @@ tools/depmap/CRISPRInferredCommonEssentials.csv
 # Generated results
 chembl_results/
 output/opentargets_results/*/cache/
+
+# Snakemake workflow outputs and downloaded resources (paths from config/config.yaml)
+/results/
+/logs/
+/benchmarks/
+/cache/
+/resources/
+/.snakemake/

@@ -1,14 +1,24 @@
-# Run from the OnlyFasta repository root. Existing inputs are read-only.
-run_name: demo_20261013
+# OnlyFasta configuration template.
+#
+# Copy this file (or edit it in place) for your own AnnData, then run:
+#   snakemake --snakefile workflow/Snakefile --configfile config/config.yaml --sdm conda --cores 8 -n
+# Remove -n after the dry run looks right. Filled-in examples: config/examples/.
+# The values below reproduce the JMML analysis (HSC, GMP, CD14 Mono; JMML vs Control).
+# Relative paths resolve from the project root (paths.project_root), not from the shell's directory.
+
+# Name of this analysis; all outputs go to <results_root>/<run_name>/. Use a new name for a new analysis.
+run_name: my_analysis
+# Populations to analyse; each must be a key of `datasets` (letters, digits, underscore).
 populations: [HSC, GMP, Mono_CD14]
+
 paths:
-  # All relative paths resolve from the directory containing this config's project root.
   project_root: .
-  results_root: results/snakemake
-  logs_root: logs/snakemake
-  benchmarks_root: benchmarks/snakemake
-  cache_root: results/snakemake_cache
+  results_root: results
+  logs_root: logs
+  benchmarks_root: benchmarks
+  cache_root: cache          # API caches (Open Targets, ChEMBL), reused between runs
   tools:
+    pseudobulk_de: tools/differential_expression/pseudobulk_de.py
     depmap_build: tools/depmap/build_depmap.py
     depmap_run: tools/depmap/run_depmap.py
     surface: tools/surface_gtex/surface_gtex_pipeline.py
@@ -18,47 +28,77 @@ paths:
     opentargets_report: tools/opentarget/ot_report_module.py
     chembl: tools/chembl_parser/chembl_parser.py
     celloracle: tools/celloracle/celloracle_candidates.py
+    summary: tools/summary/build_summary.py
   workflow:
     task_script: workflow/scripts/task.py
     envs: workflow/envs
+
+# One entry per population.
+#   celltype     - value of adata.celltype_column for this population (used by CollecTRI, LIANA, CellOracle)
+# Only needed when a stage runs in `reuse` mode:
+#   deg, gene_column - precomputed DEG table and its gene column (pseudobulk_de.mode: reuse)
+#   surface      - precomputed surface table (surface.mode: reuse)
+#   opentargets  - precomputed opentargets_features.csv (opentargets.mode: reuse)
+#   liana        - precomputed *_DEG_receptors.csv (liana.mode: reuse)
 datasets:
   HSC:
-    deg: data/HSC_DEGs_Masha.csv
-    gene_column: "Unnamed: 0"
     celltype: HSC
-    surface: data/HSC_DEGs_surface_GTEx_v11.csv
-    opentargets: output/opentargets_results/opentargets_results_HSC/opentargets_features.csv
-    liana: output/liana_results/liana_output_hsc/JMML_vs_Control_DEG_receptors.csv
   GMP:
-    deg: data/GMP_DEGs_Masha.csv
-    gene_column: "Unnamed: 0"
     celltype: GMP
-    surface: data/GMP_DEGs_surface_GTEx_v11.csv
-    opentargets: output/opentargets_results/opentargets_results_GMP/opentargets_features.csv
-    liana: output/liana_results/liana_output_gmp/JMML_vs_Control_DEG_receptors.csv
   Mono_CD14:
-    deg: data/CD14_Mono_DEGs_Masha.csv
-    gene_column: "Unnamed: 0"
     celltype: CD14 Mono
-    surface: data/CD14_Mono_DEGs_surface_GTEx_v11.csv
-    opentargets: output/opentargets_results/opentargets_results_CD14/opentargets_features.csv
-    liana: output/liana_results/liana_output_cd14/JMML_vs_Control_DEG_receptors.csv
 
+# Input AnnData and its metadata (adata.obs column names).
 adata:
-  # Relative to project_root; override this on another dataset/machine.
-  path: ../data/adata_all_samples_integrated_jmml_atlas_harmony_ANNOTATED.h5ad
-  counts_layer: counts
-  sample_column: batch
-  condition_column: sample_groups_wide
-  celltype_column: celltype_l2_merged_rename
-  case: JMML
-  control: Control
+  path: path/to/your_dataset.h5ad
+  counts_layer: counts                  # raw integer counts: a name in adata.layers, or X for adata.X
+  sample_column: batch                  # independent biological sample / donor ID
+  condition_column: sample_groups       # column with the condition of each cell
+  celltype_column: celltype_l2_merged   # column with cell type annotation
+  case: JMML                            # case label after pseudobulk_de.group_map is applied
+  control: Control                      # control label after pseudobulk_de.group_map is applied
 
+# Pseudobulk differential expression (PyDESeq2): aggregates counts per sample and cell type.
+pseudobulk_de:
+  mode: compute        # compute from adata, or reuse datasets.<pop>.deg
+  output_dir: null     # null = <results_root>/<run_name>/pseudobulk_de
+  sample_col: batch                  # pseudobulk unit (usually = adata.sample_column)
+  block_col: null                    # patient/donor ID for paired designs (~ subject + condition); null = unpaired
+  celltype_col: celltype_l2_merged   # usually = adata.celltype_column
+  group_col: sample_groups           # usually = adata.condition_column
+  counts_layer: counts               # usually = adata.counts_layer
+  # Maps observed values of group_col to the case/control labels; unmapped values are excluded.
+  # Also used by CollecTRI, LIANA and CellOracle.
+  group_map:
+    PTPN11: JMML
+    NF1: JMML
+    NRAS: JMML
+    KRAS: JMML
+    CBL: JMML
+    RALD: RALD
+    Control: Control
+  # population -> celltype_col value (or a list of values to pool); keys must equal `populations`.
+  cell_types:
+    HSC: HSC
+    GMP: GMP
+    Mono_CD14: CD14 Mono
+  case_label: JMML
+  control_label: Control
+  min_cells: 10          # min cells per pseudobulk
+  min_total_counts: 1000 # min counts per pseudobulk
+  min_replicates: 2      # min pseudobulks per condition
+  min_gene_count: 10
+  fdr: 0.05
+  lfc_cutoff: 1.0
+  n_cpus: 8
+
+# CRISPR dependency (DepMap). `reuse` uses a precomputed feature table; `build` computes it from
+# Model.csv and CRISPR*.csv in raw_dir for the selected diseases.
 depmap:
-  mode: reuse  # reuse precomputed features OR build from CRISPR matrices
+  mode: reuse
   features: tools/depmap/depmap_myeloid_features.csv
   raw_dir: tools/depmap
-  release: unknown_existing_snapshot
+  release: existing_myeloid_snapshot_release_unverified
   field: OncotreePrimaryDisease
   diseases: [Acute Myeloid Leukemia, Myeloproliferative Neoplasms]
   subtypes: [Acute Myeloid Leukemia, "AML, NOS", Acute Monoblastic/Monocytic Leukemia, AML with Myelodysplasia-Related Changes, Myeloid Leukemia Associated with Down Syndrome]
@@ -67,15 +107,22 @@ depmap:
   prevalence: 0.5
   selectivity: 0.0
 
+# Surface localisation (HPA, CSPA, TCSA) and normal-tissue expression (GTEx v11).
+# Outputs per population: <results>/<run>/surface/<population>/
 surface:
-  mode: reuse  # reuse existing annotations OR compute using downloaded atlases
+  mode: compute                    # compute (atlases are downloaded once to atlas_dir) or reuse datasets.<pop>.surface
   atlas_dir: resources/surface_gtex
-  gtex_max_tpm: 20
-  version: GTEx_v11_existing_HPA_CSPA_TCSA_snapshot
+  gtex_max_tpm: 20                 # max normal-tissue TPM for a candidate
+  # GTEx tissues ignored by the normal-tissue filter (case-insensitive substrings).
+  # Haematological tumours: blood-forming tissues below; solid tumours: usually [].
+  exclude_gtex_tissues: [whole blood, spleen, ebv-transformed lymphocytes]
+  paper_check: false               # JMML only: compare with Werner et al. 2025
+  version: HPA_CSPA_TCSA_GTEx_v11_downloaded
 
+# TF activity (CollecTRI + ULM).
 collectri:
-  mode: reuse  # saved sample-level profiles OR compute from AnnData
-  reuse_dir: data/collectri_data
+  mode: compute        # compute from adata, or reuse saved profiles in reuse_dir
+  # reuse_dir: data/collectri_data
   min_cells: 20
   min_samples: 2
   min_targets: 5
@@ -85,8 +132,9 @@ collectri:
   threads: 2
   mem_mb: 8000
 
+# Cell-cell communication (LIANA / CellChat).
 liana:
-  mode: reuse  # reuse, compute, off
+  mode: compute        # compute, reuse datasets.<pop>.liana, or "off"
   min_cells: 10
   expr_prop: 0.1
   n_perms: 100
@@ -95,27 +143,34 @@ liana:
   threads: 2
   mem_mb: 24000
 
+# Open Targets annotation (network API).
 opentargets:
-  mode: reuse  # reuse, compute, off
+  mode: compute        # compute, reuse datasets.<pop>.opentargets, or "off"
   threads: 2
   retries: 3
   timeout: 35
 
+# ChEMBL compounds (network API).
 chembl:
-  mode: "off"  # quote off in YAML; compute enables external API queries
+  mode: compute        # compute or "off" (quote off in YAML)
   threads: 2
   min_pchembl: 6
-  max_genes: 0  # >0 is only a technical smoke test, not a target ranking
-  mapping: null  # optional CSV: gene,target_chembl_id
+  max_genes: 0         # >0 only for a technical smoke test
+  mapping: null        # optional CSV: gene,target_chembl_id
 
-
+# CellOracle GRN centrality (separate output, not part of the integrated table).
+# Cell types, case/control labels and group_map are taken from datasets, adata and pseudobulk_de.
 celloracle:
-  mode: compute
+  mode: "off"          # compute or "off"
   threads: 4
   mem_mb: 48000
-  celltype_col: celltype_l2_merged
+  celltype_col: null   # null = adata.celltype_column
   hvg_col: highly_variable
   embedding_name: X_umap
   k: 100
-  min_jmml_rank: 0.90
+  min_case_rank: 0.90
   min_delta_rank: 0.0
+
+# Final candidate table (<results>/<run>/summary/).
+summary:
+  opentargets_report_genes: 2   # top candidates included in the Open Targets example report; 0 = none

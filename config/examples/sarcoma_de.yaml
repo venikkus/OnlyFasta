@@ -1,6 +1,7 @@
-# Snakemake configuration for the sarcoma pseudobulk DE stage.
-# Run only the `pseudobulk_de` target with this config; downstream modules
-# still need sarcoma-specific evidence/resource inputs before requesting `all`.
+# Example: sarcoma tumour vs microenvironment (paired within samples).
+# Field descriptions: config/config.yaml.
+# Here the contrast is defined by cell type (Tumor vs Macrophages + T cells), not by patient
+# group, so CollecTRI and LIANA (which compare one cell type between conditions) are off.
 run_name: sarcoma_tumor_vs_microenvironment_20261013
 populations: [Sarcoma]
 
@@ -21,6 +22,7 @@ paths:
     opentargets_report: tools/opentarget/ot_report_module.py
     chembl: tools/chembl_parser/chembl_parser.py
     celloracle: tools/celloracle/celloracle_candidates.py
+    summary: tools/summary/build_summary.py
   workflow:
     task_script: workflow/scripts/task.py
     envs: workflow/envs
@@ -31,9 +33,6 @@ datasets:
     deg: results/snakemake/sarcoma_tumor_vs_microenvironment_20261013/pseudobulk_de/Sarcoma_DEGs.csv
     gene_column: gene
     celltype: Tumor
-    surface: data/Sarcoma_DEGs_surface_GTEx_v11.csv
-    opentargets: data/Sarcoma_opentargets_features.csv
-    liana: data/Sarcoma_LIANA_DEG_receptors.csv
 
 adata:
   path: /media/hdd/metagenomics/hackatomics/data/MXF_annot_converted_rhdf5.h5ad
@@ -70,9 +69,9 @@ pseudobulk_de:
 
 depmap:
   mode: reuse
-  features: tools/depmap/depmap_myeloid_features.csv
+  features: tools/depmap/depmap_sarcoma_features.csv
   raw_dir: tools/depmap
-  release: unknown_existing_snapshot
+  release: existing_sarcoma_snapshot_release_unverified
   field: OncotreePrimaryDisease
   diseases: []
   subtypes: []
@@ -82,14 +81,15 @@ depmap:
   selectivity: 0.0
 
 surface:
-  mode: reuse
+  mode: compute
   atlas_dir: resources/surface_gtex
   gtex_max_tpm: 20
-  version: unconfigured_sarcoma_snapshot
+  exclude_gtex_tissues: []   # solid tumour: keep all GTEx tissues in the normal-tissue filter
+  paper_check: false
+  version: HPA_CSPA_TCSA_GTEx_v11_downloaded
 
 collectri:
-  mode: reuse
-  reuse_dir: data/collectri_data
+  mode: "off"
   min_cells: 20
   min_samples: 2
   min_targets: 5
@@ -110,7 +110,7 @@ liana:
   mem_mb: 24000
 
 opentargets:
-  mode: "off"
+  mode: compute
   threads: 2
   retries: 3
   timeout: 35
@@ -126,12 +126,12 @@ celloracle:
   mode: "off"
   threads: 4
   mem_mb: 48000
-  celltype_col: CellType_subset
-  cell_types: {Sarcoma: Tumor}
-  case_label: Tumor
-  control_label: Microenvironment
+  celltype_col: null   # adata.celltype_column; cell types and labels come from datasets/adata
   hvg_col: highly_variable
   embedding_name: X_umap
   k: 100
   min_case_rank: 0.90
   min_delta_rank: 0.0
+
+summary:
+  opentargets_report_genes: 2

@@ -83,6 +83,9 @@ def make_report(features_csv, output_file, max_genes=20):
         eid = row.get('ensembl_id')
         status = str(row.get('ot_request_status', 'unknown'))
         lines += [f'## {gene}', '', f'**Ensembl:** {eid if pd.notna(eid) else "нет"} · **Статус получения данных:** {"успешно" if status == "ok" else "данные недоступны"}', '']
+        for column, label in (('ot_approved_name', 'Название'), ('ot_pathways', 'Пути Reactome')):
+            if pd.notna(row.get(column)):
+                lines += [f'**{label}:** {row.get(column)}', '']
         if status != 'ok' or not is_true(row.get('ot_target_found')):
             lines += ['Нет подтверждённых данных из Open Targets: нельзя интерпретировать пропуски как отрицательные признаки.', '', '---', '']
             continue

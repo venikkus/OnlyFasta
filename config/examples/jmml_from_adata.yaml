@@ -1,0 +1,145 @@
+# Example: fresh JMML target-evidence run from the integrated AnnData atlas.
+# No precomputed DEG tables are consumed. Field descriptions: config/config.yaml.
+run_name: jmml_from_adata_20261014
+populations: [HSC, GMP, Mono_CD14]
+
+paths:
+  project_root: .
+  results_root: results
+  logs_root: logs
+  benchmarks_root: benchmarks
+  cache_root: cache
+  tools:
+    pseudobulk_de: tools/differential_expression/pseudobulk_de.py
+    depmap_build: tools/depmap/build_depmap.py
+    depmap_run: tools/depmap/run_depmap.py
+    surface: tools/surface_gtex/surface_gtex_pipeline.py
+    collectri: tools/collectri/run_collectri.py
+    liana: tools/liana/liana_deg.py
+    opentargets: tools/opentarget/parse_opentarget.py
+    opentargets_report: tools/opentarget/ot_report_module.py
+    chembl: tools/chembl_parser/chembl_parser.py
+    celloracle: tools/celloracle/celloracle_candidates.py
+    summary: tools/summary/build_summary.py
+  workflow:
+    task_script: workflow/scripts/task.py
+    envs: workflow/envs
+
+datasets:
+  HSC:
+    celltype: HSC
+  GMP:
+    celltype: GMP
+  Mono_CD14:
+    celltype: CD14 Mono
+
+adata:
+  path: /media/hdd/metagenomics/hackatomics/data/adata_all_samples_integrated_jmml_atlas_harmony_ANNOTATED.h5ad
+  counts_layer: counts
+  sample_column: batch
+  condition_column: sample_groups
+  celltype_column: celltype_l2_merged
+  case: JMML
+  control: Control
+
+pseudobulk_de:
+  mode: compute
+  output_dir: null
+  sample_col: batch
+  block_col: null
+  celltype_col: celltype_l2_merged
+  group_col: sample_groups
+  counts_layer: counts
+  group_map:
+    PTPN11: JMML
+    NF1: JMML
+    NRAS: JMML
+    KRAS: JMML
+    CBL: JMML
+    RALD: RALD
+    Control: Control
+  cell_types:
+    HSC: HSC
+    GMP: GMP
+    Mono_CD14: CD14 Mono
+  case_label: JMML
+  control_label: Control
+  min_cells: 10
+  min_total_counts: 1000
+  min_replicates: 2
+  min_gene_count: 10
+  fdr: 0.05
+  lfc_cutoff: 1.0
+  n_cpus: 8
+
+# Reuse the precomputed myeloid DepMap snapshot shipped in tools/depmap.
+depmap:
+  mode: reuse
+  features: tools/depmap/depmap_myeloid_features.csv
+  raw_dir: tools/depmap
+  release: existing_myeloid_snapshot_release_unverified
+  field: OncotreePrimaryDisease
+  diseases: [Acute Myeloid Leukemia, Myeloproliferative Neoplasms]
+  subtypes: [Acute Myeloid Leukemia, "AML, NOS", Acute Monoblastic/Monocytic Leukemia, AML with Myelodysplasia-Related Changes, Myeloid Leukemia Associated with Down Syndrome]
+  min_models: 3
+  strength: 0.5
+  prevalence: 0.5
+  selectivity: 0.0
+
+surface:
+  mode: compute
+  atlas_dir: resources/surface_gtex
+  gtex_max_tpm: 20
+  exclude_gtex_tissues: [whole blood, spleen, ebv-transformed lymphocytes]
+  paper_check: true
+  version: HPA_CSPA_TCSA_GTex_v11_downloaded
+
+collectri:
+  mode: compute
+  min_cells: 20
+  min_samples: 2
+  min_targets: 5
+  batch_size: 256
+  plot_top: 5
+  network_targets: 15
+  threads: 2
+  mem_mb: 8000
+
+liana:
+  mode: compute
+  min_cells: 10
+  expr_prop: 0.1
+  n_perms: 100
+  resource: consensus
+  seed: 42
+  threads: 2
+  mem_mb: 24000
+
+opentargets:
+  mode: compute
+  threads: 2
+  retries: 3
+  timeout: 35
+
+chembl:
+  mode: compute
+  threads: 2
+  min_pchembl: 6
+  max_genes: 0
+  mapping: null
+
+# CellOracle is omitted from the integrated target table in this workflow;
+# it can be added as a separate analysis after the first end-to-end run.
+celloracle:
+  mode: "off"
+  threads: 4
+  mem_mb: 48000
+  celltype_col: null   # adata.celltype_column; cell types and labels come from datasets/adata
+  hvg_col: highly_variable
+  embedding_name: X_umap
+  k: 100
+  min_case_rank: 0.90
+  min_delta_rank: 0.0
+
+summary:
+  opentargets_report_genes: 2

@@ -1,0 +1,12 @@
+channels: [conda-forge, nodefaults]
+dependencies:
+  - python=3.11
+  - pip=25.1
+  - pip:
+      - decoupler==2.1.1
+      - pandas==2.2.3
+      - numpy==2.2.6
+      - scipy==1.15.3
+      - statsmodels==0.14.5
+      - matplotlib==3.10.6
+      - networkx==3.4.2

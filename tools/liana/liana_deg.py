@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Compare LIANA CellChat scores in JMML vs Control for DEG receptors."""
 import argparse
+import json
 import logging
 from pathlib import Path
 
@@ -10,6 +11,10 @@ import numpy as np
 import pandas as pd
 import scanpy as sc
 import scipy.sparse as sp
+
+import sys
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "common"))
+from lazy_h5ad import open_counts  # noqa: E402
 
 LOG = logging.getLogger("liana_deg_diff")
 KEYS = ["source", "target", "ligand", "receptor"]
@@ -24,7 +29,11 @@ def parse_args():
     p.add_argument("--gene-col", default="gene")
     p.add_argument("--deg-celltype-col", default=None)
     p.add_argument("--condition-col", default="sample_groups_wide")
+    p.add_argument("--group-map", default=None,
+                   help="JSON mapping of observed metadata labels to analysis groups")
     p.add_argument("--celltype-col", default="celltype_l2_merged_rename")
+    p.add_argument("--counts-layer", default="counts",
+                   help="Raw counts: a name in adata.layers, or X for adata.X")
     p.add_argument("--patient-col", default="batch")
     p.add_argument("--jmml-label", default="jmml")
     p.add_argument("--control-label", default="control")
@@ -62,6 +71,10 @@ def read_deg(path, gene_col, celltype_col):
 
 def run_condition(backed, obs, label, args, outdir):
     conditions = obs[args.condition_col].astype("string").str.strip().str.lower()
+    if args.group_map:
+        mapping = {str(k).strip().lower(): str(v).strip().lower()
+                   for k, v in json.loads(args.group_map).items()}
+        conditions = conditions.map(mapping).fillna(conditions)
     mask = (conditions.eq(label.strip().lower()).fillna(False)
             & obs[args.celltype_col].notna())
 
@@ -79,7 +92,7 @@ def run_condition(backed, obs, label, args, outdir):
     if len(idx) == 0:
         raise ValueError(f"No cells found for condition {label!r}")
     LOG.info("%s: reading counts for %d cells", label, len(idx))
-    counts = backed.layers["counts"][idx, :]
+    counts = (backed.X if args.counts_layer == "X" else backed.layers[args.counts_layer])[idx, :]
     counts = (counts.tocsr() if sp.issparse(counts) else sp.csr_matrix(counts))
     counts = counts.astype(np.float32)
 
@@ -135,18 +148,18 @@ def main():
     LOG.info("Loaded %d DEG records, %d unique genes",
              len(deg), deg[args.gene_col].nunique())
 
-    backed = sc.read_h5ad(args.input, backed="r")
+    # anndata's backed mode would still load every layer into RAM; open_counts reads
+    # only the selected rows of the counts matrix.
+    handle, backed = open_counts(args.input, args.counts_layer)
     try:
         obs = backed.obs.copy()
         for col in (args.condition_col, args.celltype_col):
             if col not in obs:
                 raise ValueError(f"Missing obs column: {col}")
-        if "counts" not in backed.layers:
-            raise ValueError('Input AnnData has no layers["counts"]')
         jmml = run_condition(backed, obs, args.jmml_label, args, outdir)
         control = run_condition(backed, obs, args.control_label, args, outdir)
     finally:
-        backed.file.close()
+        handle.close()
 
     jmml = jmml.rename(columns={c: f"{c}_jmml" for c in SCORES})
     control = control.rename(columns={c: f"{c}_control" for c in SCORES})

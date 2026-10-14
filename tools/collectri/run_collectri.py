@@ -20,6 +20,7 @@ statistical testing. A purely technical sequencing batch is not sufficient.
 from __future__ import annotations
 
 import argparse
+import json
 import logging
 import re
 from pathlib import Path
@@ -27,6 +28,10 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 import scipy.sparse as sp
+
+import sys
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "common"))
+from lazy_h5ad import open_counts  # noqa: E402
 from scipy.stats import mannwhitneyu
 from statsmodels.stats.multitest import multipletests
 
@@ -41,9 +46,11 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--reuse-dir", type=Path, help="Directory containing previous CollecTRI results (read-only); required with --reuse")
     p.add_argument("--outdir", type=Path, required=True,
                    help="Output directory path, supplied by the workflow/config")
-    p.add_argument("--counts-layer", default="counts")
+    p.add_argument("--counts-layer", default="counts", help="Raw counts: a name in adata.layers, or X for adata.X")
     p.add_argument("--sample-col", default="batch", help="Independent biological sample ID")
     p.add_argument("--group-col", default="sample_groups_wide")
+    p.add_argument("--group-map", default=None,
+                   help="JSON mapping of observed metadata labels to analysis groups")
     p.add_argument("--celltype-col", default="celltype_l2_merged_rename")
     p.add_argument("--groups", nargs=2, default=["jmml", "control"], metavar=("CASE", "CONTROL"))
     p.add_argument("--celltypes", nargs="+", default=["hsc", "gmp", "cd14 mono"])
@@ -60,7 +67,8 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--network-targets", type=int, default=15)
     p.add_argument("--plot-tfs", nargs="+", default=None, help="Explicit TFs to plot (e.g. ZEB1 GATA2); overrides --plot-top")
     p.add_argument("--no-plots", action="store_true", help="Disable PDF network plots")
-    p.add_argument("--backed", action="store_true", help="Read h5ad backed (low RAM, potentially slower)")
+    p.add_argument("--backed", action="store_true",
+                   help="Keep the counts matrix on disk and read it row-wise (low RAM, potentially slower)")
     return p.parse_args()
 
 
@@ -75,6 +83,10 @@ def select_groups(adata, args: argparse.Namespace):
 
     sample = adata.obs[args.sample_col].astype("string").str.strip()
     group = norm(adata.obs[args.group_col])
+    if args.group_map:
+        mapping = {str(k).strip().lower(): str(v).strip().lower()
+                   for k, v in json.loads(args.group_map).items()}
+        group = group.map(mapping).fillna(group)
     ct = norm(adata.obs[args.celltype_col])
     keep = (
         group.isin(args.groups)
@@ -151,8 +163,9 @@ def load_network(adata, args, dc):
 
 
 def make_profiles(adata, cell_idx, group_codes, group_info, target_idx, args):
-    if args.counts_layer not in adata.layers:
+    if args.counts_layer != "X" and args.counts_layer not in adata.layers:
         raise KeyError(f"Missing adata.layers[{args.counts_layer!r}]; available: {list(adata.layers.keys())}")
+    counts = adata.X if args.counts_layer == "X" else adata.layers[args.counts_layer]
     n_groups = len(group_info)
     n_targets = len(target_idx)
     sums = np.zeros((n_groups, n_targets), dtype=np.float64)
@@ -160,7 +173,7 @@ def make_profiles(adata, cell_idx, group_codes, group_info, target_idx, args):
     for start in range(0, len(cell_idx), args.batch_size):
         end = min(start + args.batch_size, len(cell_idx))
         idx = cell_idx[start:end]
-        x = adata.layers[args.counts_layer][idx, :]
+        x = counts[idx, :]
         x = x.tocsr().astype(np.float32) if sp.issparse(x) else sp.csr_matrix(x, dtype=np.float32)
         if x.nnz and (np.any(x.data < 0) or not np.all(np.isfinite(x.data))):
             raise ValueError("Counts layer contains non-finite or negative entries")
@@ -483,7 +496,9 @@ def main() -> None:
         import anndata as ad
         import decoupler as dc
         LOG.info("Reading %s", args.input)
-        adata = ad.read_h5ad(args.input, backed="r" if args.backed else None)
+        # anndata's backed mode would still load every layer into RAM; open_counts does not.
+        handle, adata = (open_counts(args.input, args.counts_layer) if args.backed
+                         else (None, ad.read_h5ad(args.input)))
         try:
             cell_idx, group_codes, group_info = select_groups(adata, args)
             net_full, net_covered, coverage, target_idx = load_network(adata, args, dc)
@@ -504,8 +519,8 @@ def main() -> None:
             )
             summary.to_csv(args.outdir / "tf_activity_summary.csv", index=False)
         finally:
-            if args.backed and adata.file.is_open:
-                adata.file.close()
+            if handle is not None:
+                handle.close()
 
     # Calculate group-profile ULM p-values for BOTH fresh and --reuse runs.
     # These are within-condition enrichment tests, not p-values of JMML vs Control.
