@@ -1,0 +1,12 @@
+name: onlyfasta-deseq2
+channels:
+  - conda-forge
+  - bioconda
+dependencies:
+  - python=3.11
+  - anndata
+  - numpy
+  - pandas
+  - scipy
+  - pyyaml
+  - pydeseq2=0.5.4

@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Compare LIANA CellChat scores in JMML vs Control for DEG receptors."""
 import argparse
+import json
 import logging
 from pathlib import Path
 
@@ -24,6 +25,8 @@ def parse_args():
     p.add_argument("--gene-col", default="gene")
     p.add_argument("--deg-celltype-col", default=None)
     p.add_argument("--condition-col", default="sample_groups_wide")
+    p.add_argument("--group-map", default=None,
+                   help="JSON mapping of observed metadata labels to analysis groups")
     p.add_argument("--celltype-col", default="celltype_l2_merged_rename")
     p.add_argument("--patient-col", default="batch")
     p.add_argument("--jmml-label", default="jmml")
@@ -62,6 +65,10 @@ def read_deg(path, gene_col, celltype_col):
 
 def run_condition(backed, obs, label, args, outdir):
     conditions = obs[args.condition_col].astype("string").str.strip().str.lower()
+    if args.group_map:
+        mapping = {str(k).strip().lower(): str(v).strip().lower()
+                   for k, v in json.loads(args.group_map).items()}
+        conditions = conditions.map(mapping).fillna(conditions)
     mask = (conditions.eq(label.strip().lower()).fillna(False)
             & obs[args.celltype_col].notna())
 

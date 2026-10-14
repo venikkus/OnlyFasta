@@ -20,6 +20,7 @@ statistical testing. A purely technical sequencing batch is not sufficient.
 from __future__ import annotations
 
 import argparse
+import json
 import logging
 import re
 from pathlib import Path
@@ -44,6 +45,8 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--counts-layer", default="counts")
     p.add_argument("--sample-col", default="batch", help="Independent biological sample ID")
     p.add_argument("--group-col", default="sample_groups_wide")
+    p.add_argument("--group-map", default=None,
+                   help="JSON mapping of observed metadata labels to analysis groups")
     p.add_argument("--celltype-col", default="celltype_l2_merged_rename")
     p.add_argument("--groups", nargs=2, default=["jmml", "control"], metavar=("CASE", "CONTROL"))
     p.add_argument("--celltypes", nargs="+", default=["hsc", "gmp", "cd14 mono"])
@@ -75,6 +78,10 @@ def select_groups(adata, args: argparse.Namespace):
 
     sample = adata.obs[args.sample_col].astype("string").str.strip()
     group = norm(adata.obs[args.group_col])
+    if args.group_map:
+        mapping = {str(k).strip().lower(): str(v).strip().lower()
+                   for k, v in json.loads(args.group_map).items()}
+        group = group.map(mapping).fillna(group)
     ct = norm(adata.obs[args.celltype_col])
     keep = (
         group.isin(args.groups)

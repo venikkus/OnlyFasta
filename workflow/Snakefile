@@ -1,0 +1,327 @@
+from pathlib import Path
+import re
+import json
+from snakemake.utils import min_version
+
+min_version("9.3")
+# Supply the dataset-specific YAML with `--configfile`; loading a fixed default
+# here would deep-merge disease configs and retain stale population mappings.
+
+# Resolve every configured relative path from the project root, never from the
+# caller's current working directory. CLI --configfile can still select another config.
+_path_cfg = config.get("paths", {})
+PROJECT_ROOT = Path(workflow.basedir).resolve().parent
+_configured_root = Path(_path_cfg.get("project_root", ".")).expanduser()
+PROJECT_ROOT = (_configured_root if _configured_root.is_absolute() else PROJECT_ROOT / _configured_root).resolve()
+
+def project_path(value):
+    value = Path(str(value)).expanduser()
+    return str(value.resolve() if value.is_absolute() else (PROJECT_ROOT / value).resolve())
+
+for _population in config["datasets"].values():
+    for _key in ("deg", "surface", "opentargets", "liana"):
+        if _key in _population:
+            _population[_key] = project_path(_population[_key])
+for _section, _key in (("adata", "path"), ("depmap", "features"), ("depmap", "raw_dir"),
+                       ("surface", "atlas_dir"), ("collectri", "reuse_dir")):
+    if _key in config.get(_section, {}):
+        config[_section][_key] = project_path(config[_section][_key])
+if config.get("chembl", {}).get("mapping"):
+    config["chembl"]["mapping"] = project_path(config["chembl"]["mapping"])
+for _key, _value in config.get("paths", {}).get("tools", {}).items():
+    config["paths"]["tools"][_key] = project_path(_value)
+for _key in ("results_root", "logs_root", "benchmarks_root", "cache_root"):
+    if _key in config.get("paths", {}):
+        config["paths"][_key] = project_path(config["paths"][_key])
+config["paths"]["workflow"]["task_script"] = project_path(config["paths"]["workflow"].get("task_script", "workflow/scripts/task.py"))
+config["paths"]["workflow"]["envs"] = project_path(config["paths"]["workflow"].get("envs", "workflow/envs"))
+
+RUN = config["run_name"]
+if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_.-]*", RUN):
+    raise ValueError("run_name must contain only letters, digits, _, - and .")
+POPS = config["populations"]
+if not POPS or len(set(POPS)) != len(POPS) or set(POPS) - set(config["datasets"]):
+    raise ValueError("populations must be a nonempty unique list of dataset keys")
+for p in POPS:
+    if not re.fullmatch(r"[A-Za-z0-9_]+", p):
+        raise ValueError(f"Unsafe population identifier: {p}")
+if config["pseudobulk_de"]["mode"] == "compute" and set(POPS) != set(config["pseudobulk_de"]["cell_types"]):
+    raise ValueError("When pseudobulk_de.mode=compute, populations must exactly match pseudobulk_de.cell_types keys")
+for name, modes in {
+    "depmap": {"reuse", "build"}, "surface": {"reuse", "compute"},
+    "collectri": {"reuse", "compute"}, "liana": {"reuse", "compute", "off"},
+    "opentargets": {"reuse", "compute", "off"}, "chembl": {"compute", "off"},
+    "celloracle": {"compute", "off"},
+    "pseudobulk_de": {"reuse", "compute"},
+}.items():
+    if config[name]["mode"] not in modes:
+        raise ValueError(f"Invalid {name}.mode; expected {sorted(modes)}")
+
+ROOT = str(Path(project_path(config["paths"].get("results_root", "results/snakemake"))) / RUN)
+LOGS = str(Path(project_path(config["paths"].get("logs_root", "logs/snakemake"))) / RUN)
+BENCH = str(Path(project_path(config["paths"].get("benchmarks_root", "benchmarks/snakemake"))) / RUN)
+TASK = config["paths"]["workflow"]["task_script"]
+ENVS = config["paths"]["workflow"]["envs"]
+TOOLS = config["paths"]["tools"]
+PROFILE_FILES = ["expression_profiles.csv", "sample_celltype_info.csv", "tf_activity_summary.csv",
+                 "collectri_network_full.csv", "collectri_network.csv", "tf_activity.csv"]
+ATLAS_FILES = ["proteinatlas.tsv", "S2_File.xlsx", "43018_2021_282_MOESM2_ESM.xlsx",
+    "GTEx_Analysis_2025-08-22_v11_RNASeQCv2.4.3_gene_median_tpm.gct.gz",
+    "GTEx_Analysis_2017-06-05_v8_RNASeQCv1.1.9_gene_median_tpm.gct.gz"]
+
+DEPMAP_FEATURE_INPUTS = ([config["depmap"]["features"]] if config["depmap"]["mode"] == "reuse" else
+    [str(Path(config["depmap"]["raw_dir"]) / x) for x in
+     ["Model.csv", "CRISPRGeneEffect.csv", "CRISPRGeneDependency.csv", "CRISPRInferredCommonEssentials.csv"]])
+SURFACE_INPUTS = ([config["datasets"][p]["surface"] for p in POPS]
+                  if config["surface"]["mode"] == "reuse" else [config["surface"]["atlas_dir"]])
+COLLECTRI_PROFILE_INPUTS = ([str(Path(config["collectri"]["reuse_dir"]) / f) for f in PROFILE_FILES]
+                            if config["collectri"]["mode"] == "reuse" else [ROOT + "/collectri_profiles"])
+OPENTARGET_INPUTS = ([config["datasets"][p]["opentargets"] for p in POPS]
+                     if config["opentargets"]["mode"] == "reuse" else [])
+CHEMBL_MAPPING_INPUTS = [config["chembl"]["mapping"]] if config["chembl"].get("mapping") else []
+DEPMAP_MEM_MB = 12000 if config["depmap"]["mode"] == "build" else 1000
+SURFACE_ENV = "tables.yaml" if config["surface"]["mode"] == "reuse" else "surface.yaml"
+LIANA_ENV = "tables.yaml" if config["liana"]["mode"] == "reuse" else "liana.yaml"
+OPENTARGET_ENV = "tables.yaml" if config["opentargets"]["mode"] == "reuse" else "api.yaml"
+
+def normalize_deg_source(w):
+    if config["pseudobulk_de"]["mode"] == "compute":
+        return ROOT + "/pseudobulk_de"
+    return config["datasets"][w.population]["deg"]
+
+def liana_source(w):
+    if config["liana"]["mode"] == "reuse":
+        return config["datasets"][w.population]["liana"]
+    return config["adata"]["path"]
+
+wildcard_constraints:
+    population="|".join(POPS)
+
+ALL_TARGETS = [ROOT + "/report"]
+if config["celloracle"]["mode"] == "compute":
+    ALL_TARGETS.append(ROOT + "/celloracle")
+
+
+rule all:
+    input: ALL_TARGETS
+    default_target: True
+
+
+rule pseudobulk_de:
+    input:
+        adata=config["adata"]["path"],
+        tool=TOOLS["pseudobulk_de"]
+    output:
+        directory(ROOT + "/pseudobulk_de")
+    params: stage="pseudobulk_de", cfg=config
+    log: LOGS + "/pseudobulk_de.log"
+    benchmark: BENCH + "/pseudobulk_de.tsv"
+    threads: config["pseudobulk_de"]["n_cpus"]
+    resources: mem_mb=24000
+    conda: str(Path(ENVS) / "deseq2.yaml")
+    script: TASK
+
+
+rule normalize_deg:
+    input: source=normalize_deg_source
+    output: directory(ROOT + "/de/{population}")
+    params: stage="normalize", cfg=config
+    log: LOGS + "/{population}/normalize.log"
+    benchmark: BENCH + "/{population}/normalize.tsv"
+    resources: mem_mb=1000
+    conda: str(Path(ENVS) / "tables.yaml")
+    script: TASK
+
+rule depmap_features:
+    input:
+        source=DEPMAP_FEATURE_INPUTS,
+        tool=TOOLS["depmap_build"]
+    output: directory(ROOT + "/resources/depmap")
+    params: stage="depmap_features", cfg=config
+    log: LOGS + "/depmap_features.log"
+    benchmark: BENCH + "/depmap_features.tsv"
+    resources: mem_mb=DEPMAP_MEM_MB
+    conda: str(Path(ENVS) / "tables.yaml")
+    script: TASK
+
+rule depmap:
+    input:
+        deg=ROOT + "/de/{population}", features=ROOT + "/resources/depmap",
+        tool=TOOLS["depmap_run"]
+    output: directory(ROOT + "/depmap/{population}")
+    params: stage="depmap", cfg=config
+    log: LOGS + "/{population}/depmap.log"
+    benchmark: BENCH + "/{population}/depmap.tsv"
+    resources: mem_mb=1000
+    conda: str(Path(ENVS) / "tables.yaml")
+    script: TASK
+
+rule fetch_surface_atlases:
+    input: tool=TOOLS["surface"]
+    output: directory(config["surface"]["atlas_dir"])
+    params: stage="fetch_surface", cfg=config
+    log: LOGS + "/fetch_surface.log"
+    benchmark: BENCH + "/fetch_surface.tsv"
+    resources: mem_mb=1000, api_slots=1
+    conda: str(Path(ENVS) / "surface.yaml")
+    script: TASK
+
+rule surface:
+    input:
+        deg=expand(ROOT + "/de/{population}", population=POPS),
+        sources=SURFACE_INPUTS,
+        tool=TOOLS["surface"]
+    output: directory(ROOT + "/surface")
+    params: stage="surface", cfg=config
+    log: LOGS + "/surface.log"
+    benchmark: BENCH + "/surface.tsv"
+    resources: mem_mb=4000
+    conda: str(Path(ENVS) / SURFACE_ENV)
+    script: TASK
+
+if config["collectri"]["mode"] == "compute":
+    rule collectri_profiles:
+        input: adata=config["adata"]["path"], tool=TOOLS["collectri"]
+        output: directory(ROOT + "/collectri_profiles")
+        params: stage="collectri_profiles", cfg=config
+        log: LOGS + "/collectri_profiles.log"
+        benchmark: BENCH + "/collectri_profiles.tsv"
+        threads: config["collectri"]["threads"]
+        resources: mem_mb=config["collectri"]["mem_mb"], api_slots=1
+        conda: str(Path(ENVS) / "collectri.yaml")
+        script: TASK
+
+rule collectri:
+    input:
+        deg=ROOT + "/de/{population}",
+        profiles=COLLECTRI_PROFILE_INPUTS,
+        tool=TOOLS["collectri"]
+    output: directory(ROOT + "/collectri/{population}")
+    params: stage="collectri", cfg=config
+    log: LOGS + "/{population}/collectri.log"
+    benchmark: BENCH + "/{population}/collectri.tsv"
+    threads: config["collectri"]["threads"]
+    resources: mem_mb=config["collectri"]["mem_mb"]
+    conda: str(Path(ENVS) / "collectri.yaml")
+    script: TASK
+
+if config["liana"]["mode"] != "off":
+    rule liana:
+        input:
+            deg=ROOT + "/de/{population}",
+            source=liana_source,
+            tool=TOOLS["liana"]
+        output: directory(ROOT + "/liana/{population}")
+        params: stage="liana", cfg=config
+        log: LOGS + "/{population}/liana.log"
+        benchmark: BENCH + "/{population}/liana.tsv"
+        threads: config["liana"]["threads"]
+        resources: mem_mb=config["liana"]["mem_mb"], api_slots=1
+        conda: str(Path(ENVS) / LIANA_ENV)
+        script: TASK
+
+if config["opentargets"]["mode"] != "off":
+    rule opentargets:
+        input:
+            deg=ROOT + "/de/{population}",
+            source=OPENTARGET_INPUTS,
+            tool=TOOLS["opentargets"], helper=TOOLS["opentargets_report"]
+        output: directory(ROOT + "/opentargets/{population}")
+        params: stage="opentargets", cfg=config
+        log: LOGS + "/{population}/opentargets.log"
+        benchmark: BENCH + "/{population}/opentargets.tsv"
+        threads: config["opentargets"]["threads"]
+        resources: mem_mb=2000, api_slots=1
+        conda: str(Path(ENVS) / OPENTARGET_ENV)
+        script: TASK
+
+if config["chembl"]["mode"] != "off":
+    rule chembl:
+        input:
+            deg=ROOT + "/de/{population}", tool=TOOLS["chembl"],
+            mapping=CHEMBL_MAPPING_INPUTS
+        output: directory(ROOT + "/chembl/{population}")
+        params: stage="chembl", cfg=config
+        log: LOGS + "/{population}/chembl.log"
+        benchmark: BENCH + "/{population}/chembl.tsv"
+        threads: config["chembl"]["threads"]
+        resources: mem_mb=4000, api_slots=1
+        conda: str(Path(ENVS) / "api.yaml")
+        script: TASK
+
+def evidence_inputs(w):
+    return {name: f"{ROOT}/{name}/{w.population}" for name in ["liana", "opentargets", "chembl"] if config[name]["mode"] != "off"}
+
+rule integrate:
+    input:
+        unpack(evidence_inputs),
+        deg=ROOT + "/de/{population}", depmap=ROOT + "/depmap/{population}",
+        surface=ROOT + "/surface", collectri=ROOT + "/collectri/{population}"
+    output: directory(ROOT + "/integrated/{population}")
+    params: stage="integrate", cfg=config
+    log: LOGS + "/{population}/integrate.log"
+    benchmark: BENCH + "/{population}/integrate.tsv"
+    resources: mem_mb=2000
+    conda: str(Path(ENVS) / "tables.yaml")
+    script: TASK
+
+rule report:
+    input: expand(ROOT + "/integrated/{population}", population=POPS)
+    output: directory(ROOT + "/report")
+    params: stage="report", cfg=config
+    log: LOGS + "/report.log"
+    benchmark: BENCH + "/report.tsv"
+    resources: mem_mb=1000
+    conda: str(Path(ENVS) / "tables.yaml")
+    script: TASK
+
+
+if config["celloracle"]["mode"] == "compute":
+    rule celloracle:
+        input:
+            adata=config["adata"]["path"],
+            script=TOOLS["celloracle"]
+        output:
+            directory(ROOT + "/celloracle")
+        params:
+            celltype=config["celloracle"]["celltype_col"],
+            condition=config["adata"]["condition_column"],
+            counts=config["adata"]["counts_layer"],
+            hvg=config["celloracle"]["hvg_col"],
+            embedding=config["celloracle"]["embedding_name"],
+            cell_types=json.dumps(config["celloracle"]["cell_types"]),
+            case=config["celloracle"]["case_label"],
+            control=config["celloracle"]["control_label"],
+            k=config["celloracle"]["k"],
+            min_rank=config["celloracle"]["min_case_rank"],
+            min_delta=config["celloracle"]["min_delta_rank"]
+        threads:
+            config["celloracle"]["threads"]
+        resources:
+            mem_mb=config["celloracle"]["mem_mb"]
+        conda:
+            str(Path(ENVS) / "celloracle.yaml")
+        log:
+            LOGS + "/celloracle.log"
+        benchmark:
+            BENCH + "/celloracle.tsv"
+        shell:
+            r"""
+        mkdir -p "$(dirname {log:q})"
+        python {input.script:q} \
+            --input {input.adata:q} \
+            --output-dir {output:q} \
+            --celltype-col {params.celltype:q} \
+            --condition-col {params.condition:q} \
+            --counts-layer {params.counts:q} \
+            --hvg-col {params.hvg:q} \
+            --embedding-name {params.embedding:q} \
+            --cell-types-json {params.cell_types:q} \
+            --case-label {params.case:q} \
+            --control-label {params.control:q} \
+            --k {params.k} \
+            --n-jobs {threads} \
+            --min-case-rank {params.min_rank} \
+            --min-delta-rank {params.min_delta} \
+            > {log:q} 2>&1
+            """
