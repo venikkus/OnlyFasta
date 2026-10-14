@@ -42,7 +42,7 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--reuse-dir", type=Path, help="Directory containing previous CollecTRI results (read-only); required with --reuse")
     p.add_argument("--outdir", type=Path, required=True,
                    help="Output directory path, supplied by the workflow/config")
-    p.add_argument("--counts-layer", default="counts")
+    p.add_argument("--counts-layer", default="counts", help="Raw counts: a name in adata.layers, or X for adata.X")
     p.add_argument("--sample-col", default="batch", help="Independent biological sample ID")
     p.add_argument("--group-col", default="sample_groups_wide")
     p.add_argument("--group-map", default=None,
@@ -158,8 +158,9 @@ def load_network(adata, args, dc):
 
 
 def make_profiles(adata, cell_idx, group_codes, group_info, target_idx, args):
-    if args.counts_layer not in adata.layers:
+    if args.counts_layer != "X" and args.counts_layer not in adata.layers:
         raise KeyError(f"Missing adata.layers[{args.counts_layer!r}]; available: {list(adata.layers.keys())}")
+    counts = adata.X if args.counts_layer == "X" else adata.layers[args.counts_layer]
     n_groups = len(group_info)
     n_targets = len(target_idx)
     sums = np.zeros((n_groups, n_targets), dtype=np.float64)
@@ -167,7 +168,7 @@ def make_profiles(adata, cell_idx, group_codes, group_info, target_idx, args):
     for start in range(0, len(cell_idx), args.batch_size):
         end = min(start + args.batch_size, len(cell_idx))
         idx = cell_idx[start:end]
-        x = adata.layers[args.counts_layer][idx, :]
+        x = counts[idx, :]
         x = x.tocsr().astype(np.float32) if sp.issparse(x) else sp.csr_matrix(x, dtype=np.float32)
         if x.nnz and (np.any(x.data < 0) or not np.all(np.isfinite(x.data))):
             raise ValueError("Counts layer contains non-finite or negative entries")

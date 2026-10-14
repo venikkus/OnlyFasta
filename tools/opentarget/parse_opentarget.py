@@ -20,7 +20,8 @@ API = 'https://api.platform.opentargets.org/api/v4/graphql'
 QUERY = '''
 query TargetInfo($ensemblId: String!) {
   target(ensemblId: $ensemblId) {
-    id approvedSymbol biotype
+    id approvedSymbol approvedName biotype
+    pathways { pathway topLevelTerm }
     tractability { label modality value }
     geneticConstraint { constraintType score oe oeUpper }
   }
@@ -212,7 +213,8 @@ def main():
             'gene': gene, 'ensembl_id': eid, 'mapping_status': m['mapping_status'],
             'candidate_ids': m['candidate_ids'], 'ot_request_status': 'not_mapped',
             'ot_target_found': pd.NA, 'ot_error': None,
-            'ot_approved_symbol': None, 'ot_biotype': None,
+            'ot_approved_symbol': None, 'ot_approved_name': None, 'ot_biotype': None,
+            'ot_pathways': None, 'ot_pathway_top_level': None,
             'ot_lof_oe': None, 'ot_lof_oe_upper': None, 'ot_lof_constraint_score': None,
         }
         if pd.notna(eid):
@@ -225,6 +227,13 @@ def main():
                 record['ot_target_found'] = True
                 record['ot_approved_symbol'] = target.get('approvedSymbol')
                 record['ot_biotype'] = target.get('biotype')
+                # Absent in caches written before these fields were queried.
+                record['ot_approved_name'] = target.get('approvedName')
+                pathways = target.get('pathways') or []
+                record['ot_pathways'] = '; '.join(dict.fromkeys(
+                    x['pathway'] for x in pathways if x.get('pathway'))) or None
+                record['ot_pathway_top_level'] = '; '.join(dict.fromkeys(
+                    x['topLevelTerm'] for x in pathways if x.get('topLevelTerm'))) or None
                 lof = next((c for c in (target.get('geneticConstraint') or [])
                             if str(c.get('constraintType', '')).lower() in ('lof', 'lof_hc')), None)
                 if lof:

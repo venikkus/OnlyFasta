@@ -28,6 +28,8 @@ def parse_args():
     p.add_argument("--group-map", default=None,
                    help="JSON mapping of observed metadata labels to analysis groups")
     p.add_argument("--celltype-col", default="celltype_l2_merged_rename")
+    p.add_argument("--counts-layer", default="counts",
+                   help="Raw counts: a name in adata.layers, or X for adata.X")
     p.add_argument("--patient-col", default="batch")
     p.add_argument("--jmml-label", default="jmml")
     p.add_argument("--control-label", default="control")
@@ -86,7 +88,7 @@ def run_condition(backed, obs, label, args, outdir):
     if len(idx) == 0:
         raise ValueError(f"No cells found for condition {label!r}")
     LOG.info("%s: reading counts for %d cells", label, len(idx))
-    counts = backed.layers["counts"][idx, :]
+    counts = (backed.X if args.counts_layer == "X" else backed.layers[args.counts_layer])[idx, :]
     counts = (counts.tocsr() if sp.issparse(counts) else sp.csr_matrix(counts))
     counts = counts.astype(np.float32)
 
@@ -148,8 +150,8 @@ def main():
         for col in (args.condition_col, args.celltype_col):
             if col not in obs:
                 raise ValueError(f"Missing obs column: {col}")
-        if "counts" not in backed.layers:
-            raise ValueError('Input AnnData has no layers["counts"]')
+        if args.counts_layer != "X" and args.counts_layer not in backed.layers:
+            raise ValueError(f"Input AnnData has no layers[{args.counts_layer!r}]")
         jmml = run_condition(backed, obs, args.jmml_label, args, outdir)
         control = run_condition(backed, obs, args.control_label, args, outdir)
     finally:

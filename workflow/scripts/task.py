@@ -160,31 +160,26 @@ def depmap(w):
 
 def surface(w):
     cfg = C["surface"]
+    genes = table(Path(I.deg) / "genes.csv", ["gene", "log2FoldChange", "padj"], "gene", False)
     if cfg["mode"] == "compute":
         module = tool_module(I.tool)
-        module.DEG_FILES = {C["datasets"][p]["celltype"]: f"{p}_input.csv" for p in C["populations"]}
-        module.GTEX_MAX_TPM = cfg["gtex_max_tpm"]
-        for p, deg_dir in zip(C["populations"], I.deg):
-            table(Path(deg_dir) / "genes.csv").set_index("gene").to_csv(w / f"{p}_input.csv")
-        files = [module.HPA_FILE, module.CSPA_FILE, module.TCSA_FILE, module.GTEX_FILE, module.GTEX_V8_FILE]
-        for name in files:
-            source = Path(cfg["atlas_dir"]) / name
-            if not source.is_file():
-                raise FileNotFoundError(source)
-            (w / name).symlink_to(source.resolve())
-        # Import entry point avoids the original script's automatic pip/venv setup.
-        module.main(w)
-        sources = [w / f"{C['datasets'][p]['celltype'].replace(' ', '_')}_DEGs_surface_GTEx_v11.csv" for p in C["populations"]]
+        # Import entry point avoids the original script's automatic pip/venv setup;
+        # atlases are read in place from surface.atlas_dir.
+        exclude = cfg.get("exclude_gtex_tissues")
+        module.run_surface(genes.set_index("gene"), POP, I.source, w,
+                           gtex_max_tpm=cfg["gtex_max_tpm"], exclude_tissue_keys=exclude,
+                           paper_check=cfg.get("paper_check", False))
+        excluded = module.HEMATO_KEYS if exclude is None else exclude
     else:
-        sources = I.sources
-    for p, source, deg_dir in zip(C["populations"], sources, I.deg):
-        d = table(source, ["gene", "Surface", "GTEx_max_TPM", "Candidate"], "gene", False)
-        genes = set(table(Path(deg_dir) / "genes.csv").gene)
-        if not genes <= set(d.gene):
-            raise ValueError(f"{p}: surface snapshot does not cover all input DEG genes")
-        d[d.gene.isin(genes)].to_csv(w / f"{p}.csv", index=False)
-        QC[p] = {"rows": len(genes), "surface_candidates": int(d.Candidate.eq("Yes").sum())}
-    WARNINGS.append("GTEx filter excludes hematopoietic tissues in the original tool; Candidate is not proven JMML specificity or safety.")
+        snapshot = table(I.source, ["gene", "Surface", "GTEx_max_TPM", "Candidate"], "gene", False)
+        snapshot[snapshot.gene.isin(genes.gene)].to_csv(w / "DEGs_surface_GTEx.csv", index=False)
+        excluded = "as in the reused snapshot"
+    d = table(w / "DEGs_surface_GTEx.csv", ["gene", "Surface", "GTEx_max_TPM", "Candidate"], "gene", False)
+    if set(d.gene) != set(genes.gene):
+        raise ValueError(f"{POP}: surface table does not cover exactly the input DEG genes")
+    QC["rows"] = len(d)
+    QC["surface_candidates"] = int(d.Candidate.eq("Yes").sum())
+    WARNINGS.append(f"GTEx normal-tissue filter excludes tissues: {excluded}; Candidate is not proven tumor specificity or safety.")
 
 
 def collectri_args():
@@ -226,11 +221,10 @@ def liana(w):
     if c["mode"] == "reuse":
         shutil.copy2(I.source, w / filename)
     else:
-        if a["counts_layer"] != "counts":
-            raise ValueError("Current LIANA tool requires layers['counts']")
         run(sys.executable, I.tool, "--input", I.source, "--deg", Path(I.deg) / "genes.csv",
             "--outdir", w, "--gene-col", "gene", "--receivers", DS["celltype"],
             "--condition-col", a["condition_column"], "--celltype-col", a["celltype_column"],
+            "--counts-layer", a["counts_layer"],
             "--group-map", json.dumps(C["pseudobulk_de"]["group_map"]),
             "--patient-col", a["sample_column"], "--jmml-label", a["case"].lower(), "--control-label", a["control"].lower(),
             "--min-cells", c["min_cells"], "--expr-prop", c["expr_prop"], "--n-perms", c["n_perms"],
@@ -298,9 +292,13 @@ def integrate(w):
         x = x.rename(columns={c: prefix + c for c in x if c != "gene"})
         d = d.merge(x, on="gene", how="left", validate="one_to_one")
     join(Path(I.depmap) / "features.csv", "")
-    join(Path(I.surface) / f"{POP}.csv", "surface_")
-    join(Path(I.collectri) / "candidate_tf_activity.csv", "collectri_",
-         ["delta_activity", "pvalue", "padj", "n_jmml", "n_control", "ulm_score_jmml", "ulm_score_control", "activity_available", "jmml_higher"])
+    join(Path(I.surface) / "DEGs_surface_GTEx.csv", "surface_")
+    if "collectri" in I.keys():
+        # CollecTRI names score columns after the lower-cased case/control labels.
+        case, control = C["adata"]["case"].strip().lower(), C["adata"]["control"].strip().lower()
+        join(Path(I.collectri) / "candidate_tf_activity.csv", "collectri_",
+             ["delta_activity", "pvalue", "padj", "n_jmml", "n_control", f"ulm_score_{case}", f"ulm_score_{control}",
+              "activity_available", "jmml_higher"])
     for name in ["opentargets", "chembl"]:
         if name in I.keys():
             filename = "opentargets_features.csv" if name == "opentargets" else "chembl_gene_features.csv"
@@ -323,7 +321,7 @@ def integrate(w):
         WARNINGS.extend(value["warnings"])
     QC.update({"n_genes": len(d), "depmap_matched": int(d.depmap_strength.notna().sum()),
         "depmap_threshold_candidates": int(d.depmap_pass_tool_thresholds.sum()),
-        "collectri_measured": int(d.collectri_delta_activity.notna().sum())})
+        "collectri_measured": int(d.collectri_delta_activity.notna().sum()) if "collectri_delta_activity" in d else None})
     dump(w / "source_manifests.json", sources)
 
 
@@ -351,6 +349,17 @@ def report(w):
     QC["total_gene_population_rows"] = sum(len(t) for t in tables)
 
 
+def summary(w):
+    module = tool_module(I.tool)
+    table = module.build_summary(Path(I.report).parent, C["populations"], C["adata"]["case"],
+                                 C["adata"]["control"], w,
+                                 report_genes=C.get("summary", {}).get("opentargets_report_genes", 2),
+                                 ot_report_path=I.ot_report)
+    QC["n_candidate_rows"] = len(table)
+    QC["per_population"] = table.Population.value_counts().to_dict()
+    QC["tf_branch"] = int(table.TF.eq("Yes").sum())
+
+
 def execute(w):
     if STAGE == "fetch_surface":
         module = tool_module(I.tool)
@@ -364,7 +373,7 @@ def execute(w):
         funcs = {"normalize": norm_deg, "depmap_features": depmap_features, "depmap": depmap,
             "surface": surface, "collectri": collectri, "liana": liana,
             "opentargets": network_api, "chembl": network_api, "integrate": integrate,
-            "report": report, "pseudobulk_de": pseudobulk_de}
+            "report": report, "summary": summary, "pseudobulk_de": pseudobulk_de}
         funcs[STAGE](w)
 
 

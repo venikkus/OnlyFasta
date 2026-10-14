@@ -49,7 +49,7 @@ if config["pseudobulk_de"]["mode"] == "compute" and set(POPS) != set(config["pse
     raise ValueError("When pseudobulk_de.mode=compute, populations must exactly match pseudobulk_de.cell_types keys")
 for name, modes in {
     "depmap": {"reuse", "build"}, "surface": {"reuse", "compute"},
-    "collectri": {"reuse", "compute"}, "liana": {"reuse", "compute", "off"},
+    "collectri": {"reuse", "compute", "off"}, "liana": {"reuse", "compute", "off"},
     "opentargets": {"reuse", "compute", "off"}, "chembl": {"compute", "off"},
     "celloracle": {"compute", "off"},
     "pseudobulk_de": {"reuse", "compute"},
@@ -63,6 +63,8 @@ BENCH = str(Path(project_path(config["paths"].get("benchmarks_root", "benchmarks
 TASK = config["paths"]["workflow"]["task_script"]
 ENVS = config["paths"]["workflow"]["envs"]
 TOOLS = config["paths"]["tools"]
+# Configs written before the summary step existed do not list it.
+TOOLS.setdefault("summary", project_path("tools/summary/build_summary.py"))
 PROFILE_FILES = ["expression_profiles.csv", "sample_celltype_info.csv", "tf_activity_summary.csv",
                  "collectri_network_full.csv", "collectri_network.csv", "tf_activity.csv"]
 ATLAS_FILES = ["proteinatlas.tsv", "S2_File.xlsx", "43018_2021_282_MOESM2_ESM.xlsx",
@@ -72,8 +74,6 @@ ATLAS_FILES = ["proteinatlas.tsv", "S2_File.xlsx", "43018_2021_282_MOESM2_ESM.xl
 DEPMAP_FEATURE_INPUTS = ([config["depmap"]["features"]] if config["depmap"]["mode"] == "reuse" else
     [str(Path(config["depmap"]["raw_dir"]) / x) for x in
      ["Model.csv", "CRISPRGeneEffect.csv", "CRISPRGeneDependency.csv", "CRISPRInferredCommonEssentials.csv"]])
-SURFACE_INPUTS = ([config["datasets"][p]["surface"] for p in POPS]
-                  if config["surface"]["mode"] == "reuse" else [config["surface"]["atlas_dir"]])
 COLLECTRI_PROFILE_INPUTS = ([str(Path(config["collectri"]["reuse_dir"]) / f) for f in PROFILE_FILES]
                             if config["collectri"]["mode"] == "reuse" else [ROOT + "/collectri_profiles"])
 OPENTARGET_INPUTS = ([config["datasets"][p]["opentargets"] for p in POPS]
@@ -89,6 +89,11 @@ def normalize_deg_source(w):
         return ROOT + "/pseudobulk_de"
     return config["datasets"][w.population]["deg"]
 
+def surface_source(w):
+    if config["surface"]["mode"] == "reuse":
+        return config["datasets"][w.population]["surface"]
+    return config["surface"]["atlas_dir"]
+
 def liana_source(w):
     if config["liana"]["mode"] == "reuse":
         return config["datasets"][w.population]["liana"]
@@ -97,9 +102,8 @@ def liana_source(w):
 wildcard_constraints:
     population="|".join(POPS)
 
-ALL_TARGETS = [ROOT + "/report"]
-if config["celloracle"]["mode"] == "compute":
-    ALL_TARGETS.append(ROOT + "/celloracle")
+ALL_TARGETS = [ROOT + "/summary"]
+CELLORACLE_OUTPUT = [ROOT + "/celloracle"] if config["celloracle"]["mode"] == "compute" else []
 
 
 rule all:
@@ -168,13 +172,13 @@ rule fetch_surface_atlases:
 
 rule surface:
     input:
-        deg=expand(ROOT + "/de/{population}", population=POPS),
-        sources=SURFACE_INPUTS,
+        deg=ROOT + "/de/{population}",
+        source=surface_source,
         tool=TOOLS["surface"]
-    output: directory(ROOT + "/surface")
+    output: directory(ROOT + "/surface/{population}")
     params: stage="surface", cfg=config
-    log: LOGS + "/surface.log"
-    benchmark: BENCH + "/surface.tsv"
+    log: LOGS + "/{population}/surface.log"
+    benchmark: BENCH + "/{population}/surface.tsv"
     resources: mem_mb=4000
     conda: str(Path(ENVS) / SURFACE_ENV)
     script: TASK
@@ -191,19 +195,20 @@ if config["collectri"]["mode"] == "compute":
         conda: str(Path(ENVS) / "collectri.yaml")
         script: TASK
 
-rule collectri:
-    input:
-        deg=ROOT + "/de/{population}",
-        profiles=COLLECTRI_PROFILE_INPUTS,
-        tool=TOOLS["collectri"]
-    output: directory(ROOT + "/collectri/{population}")
-    params: stage="collectri", cfg=config
-    log: LOGS + "/{population}/collectri.log"
-    benchmark: BENCH + "/{population}/collectri.tsv"
-    threads: config["collectri"]["threads"]
-    resources: mem_mb=config["collectri"]["mem_mb"]
-    conda: str(Path(ENVS) / "collectri.yaml")
-    script: TASK
+if config["collectri"]["mode"] != "off":
+    rule collectri:
+        input:
+            deg=ROOT + "/de/{population}",
+            profiles=COLLECTRI_PROFILE_INPUTS,
+            tool=TOOLS["collectri"]
+        output: directory(ROOT + "/collectri/{population}")
+        params: stage="collectri", cfg=config
+        log: LOGS + "/{population}/collectri.log"
+        benchmark: BENCH + "/{population}/collectri.tsv"
+        threads: config["collectri"]["threads"]
+        resources: mem_mb=config["collectri"]["mem_mb"]
+        conda: str(Path(ENVS) / "collectri.yaml")
+        script: TASK
 
 if config["liana"]["mode"] != "off":
     rule liana:
@@ -250,13 +255,13 @@ if config["chembl"]["mode"] != "off":
         script: TASK
 
 def evidence_inputs(w):
-    return {name: f"{ROOT}/{name}/{w.population}" for name in ["liana", "opentargets", "chembl"] if config[name]["mode"] != "off"}
+    return {name: f"{ROOT}/{name}/{w.population}" for name in ["collectri", "liana", "opentargets", "chembl"] if config[name]["mode"] != "off"}
 
 rule integrate:
     input:
         unpack(evidence_inputs),
         deg=ROOT + "/de/{population}", depmap=ROOT + "/depmap/{population}",
-        surface=ROOT + "/surface", collectri=ROOT + "/collectri/{population}"
+        surface=ROOT + "/surface/{population}"
     output: directory(ROOT + "/integrated/{population}")
     params: stage="integrate", cfg=config
     log: LOGS + "/{population}/integrate.log"
@@ -275,6 +280,21 @@ rule report:
     conda: str(Path(ENVS) / "tables.yaml")
     script: TASK
 
+# Final candidate table across all modules: <results>/<run>/summary/
+rule summary:
+    input:
+        report=ROOT + "/report",
+        celloracle=CELLORACLE_OUTPUT,
+        tool=TOOLS["summary"],
+        ot_report=TOOLS["opentargets_report"]
+    output: directory(ROOT + "/summary")
+    params: stage="summary", cfg=config
+    log: LOGS + "/summary.log"
+    benchmark: BENCH + "/summary.tsv"
+    resources: mem_mb=2000
+    conda: str(Path(ENVS) / "tables.yaml")
+    script: TASK
+
 
 if config["celloracle"]["mode"] == "compute":
     rule celloracle:
@@ -284,17 +304,22 @@ if config["celloracle"]["mode"] == "compute":
         output:
             directory(ROOT + "/celloracle")
         params:
-            celltype=config["celloracle"]["celltype_col"],
+            # Cell types, contrast labels and group mapping are shared with the
+            # rest of the workflow so that one config edit applies everywhere.
+            celltype=config["celloracle"].get("celltype_col") or config["adata"]["celltype_column"],
             condition=config["adata"]["condition_column"],
             counts=config["adata"]["counts_layer"],
             hvg=config["celloracle"]["hvg_col"],
             embedding=config["celloracle"]["embedding_name"],
-            cell_types=json.dumps(config["celloracle"]["cell_types"]),
-            case=config["celloracle"]["case_label"],
-            control=config["celloracle"]["control_label"],
-            k=config["celloracle"]["k"],
+            cell_types=json.dumps({p: config["datasets"][p]["celltype"] for p in POPS}),
+            case=config["adata"]["case"],
+            control=config["adata"]["control"],
+            group_map=json.dumps(config["pseudobulk_de"]["group_map"]),
             min_rank=config["celloracle"]["min_case_rank"],
-            min_delta=config["celloracle"]["min_delta_rank"]
+            # k and min_delta_rank may be null in the config: omit them so the tool defaults apply.
+            optional=" ".join(f"--{flag} {config['celloracle'][key]}" for flag, key in
+                              (("k", "k"), ("min-delta-rank", "min_delta_rank"))
+                              if config["celloracle"].get(key) is not None)
         threads:
             config["celloracle"]["threads"]
         resources:
@@ -319,9 +344,9 @@ if config["celloracle"]["mode"] == "compute":
             --cell-types-json {params.cell_types:q} \
             --case-label {params.case:q} \
             --control-label {params.control:q} \
-            --k {params.k} \
+            --group-map {params.group_map:q} \
             --n-jobs {threads} \
             --min-case-rank {params.min_rank} \
-            --min-delta-rank {params.min_delta} \
+            {params.optional} \
             > {log:q} 2>&1
             """

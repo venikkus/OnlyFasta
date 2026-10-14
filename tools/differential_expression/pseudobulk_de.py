@@ -103,7 +103,7 @@ def run_pseudobulk_de(
 
     # A dataset may use the same obs field for cell selection and contrast
     # labels (e.g. sarcoma CellType_subset); avoid duplicate column names.
-    obs_columns = list(dict.fromkeys([sample_col, celltype_col, group_col]))
+    obs_columns = list(dict.fromkeys([sample_col, celltype_col, group_col, *([block_col] if block_col else [])]))
     obs = adata.obs[obs_columns].copy()
     obs["condition"] = obs[group_col].astype(object).map(group_map)
     selected_labels = {label for labels in cell_types.values() for label in labels}
